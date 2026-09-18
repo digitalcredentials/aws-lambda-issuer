@@ -53,7 +53,14 @@ export default function App() {
       }
       const { verifiablePresentationRequest } = await res.json()
 
-      const result = await navigator.credentials.get({
+      // Call the CHAPI polyfill's container directly: password-manager
+      // extensions (e.g. 1Password) can lock navigator.credentials.get, in
+      // which case a call to it reaches the NATIVE API instead, which throws
+      // "No credential type was specified in the request".
+      const credentials =
+        (navigator as unknown as { credentialsPolyfill?: { credentials: CredentialsContainer } })
+          .credentialsPolyfill?.credentials ?? navigator.credentials
+      const result = await credentials.get({
         web: { VerifiablePresentation: verifiablePresentationRequest }
       } as CredentialRequestOptions)
 
