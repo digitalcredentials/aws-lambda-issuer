@@ -1,5 +1,10 @@
 # aws-lambda-issuer
 
+> [!WARNING]
+> This is a throw-away repository, built for testing the LCW sandbox's
+> issuance flow. It is not meant for long-term use: expect it to change
+> without notice, be reset, or disappear entirely.
+
 A Verifiable Credential issuer for the LCW sandbox, defined with
 [AWS SAM](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/what-is-sam.html):
 a Lambda that issues one credential (the **LCW Sandbox Badge**) over
