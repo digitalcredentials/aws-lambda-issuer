@@ -1,0 +1,20 @@
+{
+  "name": "lcw-sandbox-issuer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/local-test.mjs"
+  },
+  "dependencies": {
+    "@digitalbazaar/ed25519-signature-2020": "^5.4.0",
+    "@digitalbazaar/ed25519-verification-key-2020": "^4.2.0",
+    "@digitalbazaar/vc": "^7.3.0",
+    "@digitalcredentials/security-document-loader": "^9.0.0"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1127.0",
+    "aws-sdk-client-mock": "^4.1.0",
+    "esbuild": "^0.28.2"
+  }
+}

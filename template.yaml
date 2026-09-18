@@ -1,0 +1,210 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  VCALM credential issuer for the LCW sandbox: an exchange endpoint that
+  issues one kind of credential (DIDAuth-bound to the wallet's DID), plus
+  the S3+CloudFront-hosted collection page from which wallets claim it.
+
+Parameters:
+  IssuerSeed:
+    Type: String
+    NoEcho: true
+    Description: >
+      64-char hex seed for the issuer's Ed25519 signing key (its did:key is
+      derived from this). Keep it stable: the derived DID is what verifiers
+      register.
+  DomainName:
+    Type: String
+    Description: Domain for the collection page.
+    Default: issuer.lcw-sandbox.org
+  CertificateArn:
+    Type: String
+    Description: ACM certificate (us-east-1) covering DomainName.
+    Default: arn:aws:acm:us-east-1:747170788015:certificate/c63f6ba4-2630-4c4f-973f-4fd6436962f0
+  HostedZoneId:
+    Type: String
+    Description: Route 53 hosted zone for DomainName.
+    Default: Z04250862QG6MQUAE24XV
+
+Resources:
+  IssuerHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - '*'
+
+  # Exchange state: challenge, status, and the issued result, expiring via TTL.
+  ExchangesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: exchangeId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: exchangeId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  IssuerFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: lcw-sandbox-issuer
+      Description: VCALM workflow exchanges that issue the LCW Sandbox Badge
+      CodeUri: src/issuer
+      Handler: app.lambdaHandler
+      Runtime: nodejs24.x
+      MemorySize: 512
+      # Cold starts resolve DIDs and fetch JSON-LD contexts
+      Timeout: 20
+      Environment:
+        Variables:
+          ISSUER_SEED: !Ref IssuerSeed
+          TABLE_NAME: !Ref ExchangesTable
+          COLLECTION_PAGE_URL: !Sub https://${DomainName}
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ExchangesTable
+      Events:
+        CreateExchange:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref IssuerHttpApi
+            Path: /workflows/{workflowId}/exchanges
+            Method: post
+        ParticipateExchange:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref IssuerHttpApi
+            Path: /workflows/{workflowId}/exchanges/{exchangeId}
+            Method: post
+        GetExchange:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref IssuerHttpApi
+            Path: /workflows/{workflowId}/exchanges/{exchangeId}
+            Method: get
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Format: "esm"
+        Platform: "node"
+        External:
+          - "@aws-sdk/*"
+        OutExtension:
+          - .js=.mjs
+        EntryPoints:
+          - app.mjs
+        Banner:
+          - js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);
+
+  # ---- the collection page: private bucket behind CloudFront (CHAPI needs a
+  # secure context, which the S3 website endpoint cannot provide)
+
+  CollectionPageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub lcw-issuer-page-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  CollectionPageOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub lcw-issuer-page-oac-${AWS::AccountId}
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CollectionPageDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: LCW sandbox issuer collection page
+        Aliases:
+          - !Ref DomainName
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: page-bucket
+            DomainName: !GetAtt CollectionPageBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CollectionPageOAC.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: page-bucket
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          # CachingOptimized managed policy
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+
+  CollectionPageBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CollectionPageBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${CollectionPageBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CollectionPageDistribution}
+
+  CollectionPageDnsA:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2
+        DNSName: !GetAtt CollectionPageDistribution.DomainName
+
+  CollectionPageDnsAAAA:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: AAAA
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2
+        DNSName: !GetAtt CollectionPageDistribution.DomainName
+
+Outputs:
+  ExchangeApi:
+    Description: Base URL of the issuer exchange API
+    Value: !Sub https://${IssuerHttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  CollectionPageUrl:
+    Description: URL of the collection page
+    Value: !Sub https://${DomainName}
+  CollectionPageBucket:
+    Description: Bucket the built collection page syncs to
+    Value: !Ref CollectionPageBucket
+  CollectionPageDistributionId:
+    Description: CloudFront distribution to invalidate after a sync
+    Value: !Ref CollectionPageDistribution
