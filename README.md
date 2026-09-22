@@ -19,7 +19,7 @@ One workflow, `lcw-sandbox-badge`:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | POST | `/workflows/lcw-sandbox-badge/exchanges` | Create an exchange; returns its URL and the CHAPI-ready `verifiablePresentationRequest` (DIDAuthentication query, challenge, domain, and `interact.service` endpoints). An optional JSON body `{"name": "..."}` puts that name on the issued credential's subject |
-| POST | `/workflows/lcw-sandbox-badge/exchanges/{exchangeId}` | Participate: an empty body gets the DIDAuthentication request; a body with `verifiablePresentation` gets verified and answered with the issued credential |
+| POST | `/workflows/lcw-sandbox-badge/exchanges/{exchangeId}` | Participate: an empty body gets the DIDAuthentication request; a body with `verifiablePresentation` gets verified and answered with the issued credential. The LCW mobile wallet's shape is also accepted — a bare signed presentation as the body (challenge only, no domain), answered with the bare presentation holding the credential |
 | GET | `/workflows/lcw-sandbox-badge/exchanges/{exchangeId}` | The exchange's state |
 | POST | `/workflows/lcw-sandbox-badge/notifications` | Send a claim email: `{"name", "email"}` → SES mails the address a link to the collection page with `?name=` attached |
 
@@ -40,10 +40,15 @@ credential: **Continue to claim** proceeds in this browser (writing `?name=`
 into the URL), or an email address turns it into a mailed claim link — the
 notifications endpoint emails a link back to this page with the name as a
 `?name=` query parameter. Opened with a name, it shows the badge card for
-that name with an **Add to Wallet** button that creates an exchange (passing
-the name along, so the issued credential's subject carries it) and hands the
-presentation request to the user's wallet via [CHAPI](https://chapi.io/). The
-call goes through
+that name with two claim options, each creating an exchange (passing the name
+along, so the issued credential's subject carries it): **Add to Web Wallet**
+hands the presentation request to the user's wallet via
+[CHAPI](https://chapi.io/), and **Add to Mobile Wallet** builds the
+[Learner Credential Wallet app](https://github.com/openwallet-foundation-labs/learner-credential-wallet)'s
+request deep link
+(`https://lcw.app/request?issuer=…&vc_request_url=…&challenge=…&auth_type=bearer`),
+shown as a QR code to scan plus a tappable link for phones. The CHAPI call
+goes through
 `navigator.credentialsPolyfill.credentials.get` rather than
 `navigator.credentials.get`, which password-manager extensions (e.g.
 1Password) can lock — a call that reaches the native API throws "No credential

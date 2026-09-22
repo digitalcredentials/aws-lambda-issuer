@@ -179,6 +179,13 @@ async function loadExchange(exchangeId) {
   };
 }
 
+// The LCW mobile wallet POSTs its signed presentation as the request body
+// itself (the web flow wraps it in {verifiablePresentation}) and expects the
+// response to be the presentation holding the credential, unwrapped.
+function isBareVp(body) {
+  return [body?.type ?? []].flat().includes("VerifiablePresentation");
+}
+
 async function participate(event, exchange) {
   let body;
   try {
@@ -186,21 +193,22 @@ async function participate(event, exchange) {
   } catch {
     return json(400, { error: "Request body must be JSON." });
   }
+  const bare = isBareVp(body);
 
   // A completed exchange replays its result (idempotent for retries)
   if (exchange.state === "complete") {
-    return json(200, exchange.result);
+    return json(200, bare ? exchange.result.verifiablePresentation : exchange.result);
   }
 
   // No presentation yet: answer with the DIDAuthentication request
-  if (!body.verifiablePresentation) {
+  if (!bare && !body.verifiablePresentation) {
     return json(200, didAuthRequest(exchange));
   }
 
   let holderDid;
   try {
     holderDid = await verifyDidAuth({
-      presentation: body.verifiablePresentation,
+      presentation: bare ? body : body.verifiablePresentation,
       challenge: exchange.challenge,
       domain: exchange.domain,
     });
@@ -233,7 +241,7 @@ async function participate(event, exchange) {
     })
   );
 
-  return json(200, result);
+  return json(200, bare ? result.verifiablePresentation : result);
 }
 
 export const lambdaHandler = async (event) => {

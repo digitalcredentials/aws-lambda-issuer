@@ -73,12 +73,16 @@ export function badgeCredential({ issuerDid, holderDid, holderName }) {
 }
 
 // Verifies the wallet's DIDAuth presentation against the exchange's challenge
-// and domain; returns the holder DID on success, throws on failure.
+// and domain; returns the holder DID on success, throws on failure. The LCW
+// mobile wallet signs over the challenge alone, so the domain is enforced
+// only when the presentation's proof carries one.
 export async function verifyDidAuth({ presentation, challenge, domain }) {
+  const proofs = [presentation?.proof ?? []].flat();
+  const proofHasDomain = proofs.some((p) => p?.domain);
   const result = await vc.verify({
     presentation,
     challenge,
-    domain,
+    ...(proofHasDomain && { domain }),
     suite: new Ed25519Signature2020(),
     documentLoader,
   });

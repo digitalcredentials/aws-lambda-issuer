@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import * as polyfill from 'credential-handler-polyfill'
+import QRCode from 'qrcode'
 
 const API = (import.meta.env.VITE_EXCHANGE_API ?? '').replace(/\/+$/, '')
 const WORKFLOW = 'lcw-sandbox-badge'
@@ -179,6 +180,42 @@ function ClaimCard({ claimName }: { claimName: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
+  const [mobile, setMobile] = useState<{ link: string; qr: string } | null>(null)
+
+  async function createExchange() {
+    const res = await fetch(`${API}/workflows/${WORKFLOW}/exchanges`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: claimName })
+    })
+    if (!res.ok) {
+      throw new Error(`The issuer could not start an exchange (${res.status}).`)
+    }
+    return res.json()
+  }
+
+  // The mobile LCW app claims through its request deep link: it signs a
+  // DIDAuth presentation over the challenge and POSTs it to vc_request_url.
+  async function addToMobileWallet() {
+    setBusy(true)
+    setError('')
+    setMobile(null)
+    try {
+      const { id, verifiablePresentationRequest } = await createExchange()
+      const link =
+        'https://lcw.app/request' +
+        `?issuer=${encodeURIComponent(window.location.origin)}` +
+        `&vc_request_url=${encodeURIComponent(id)}` +
+        `&challenge=${encodeURIComponent(verifiablePresentationRequest.challenge)}` +
+        '&auth_type=bearer'
+      const qr = await QRCode.toDataURL(link, { width: 220, margin: 1 })
+      setMobile({ link, qr })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function claim() {
     setBusy(true)
@@ -192,15 +229,7 @@ function ClaimCard({ claimName }: { claimName: string }) {
       // A fresh exchange for this claim; its request carries the challenge,
       // domain, and the exchange URL the wallet interacts with. The name
       // rides along so the issued credential carries it.
-      const res = await fetch(`${API}/workflows/${WORKFLOW}/exchanges`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: claimName })
-      })
-      if (!res.ok) {
-        throw new Error(`The issuer could not start an exchange (${res.status}).`)
-      }
-      const { verifiablePresentationRequest } = await res.json()
+      const { verifiablePresentationRequest } = await createExchange()
 
       // Call the CHAPI polyfill's container directly: password-manager
       // extensions (e.g. 1Password) can lock navigator.credentials.get, in
@@ -239,8 +268,24 @@ function ClaimCard({ claimName }: { claimName: string }) {
         credential is issued to it in your name.
       </p>
       <button style={styles.button} onClick={claim} disabled={busy}>
-        {busy ? 'Waiting for your wallet…' : 'Add to Wallet'}
+        {busy ? 'Working…' : 'Add to Web Wallet'}
       </button>
+      <button style={styles.secondaryButton} onClick={addToMobileWallet} disabled={busy}>
+        Add to Mobile Wallet
+      </button>
+      {mobile && (
+        <div style={{ marginTop: 14 }}>
+          <img src={mobile.qr} alt="QR code for the mobile claim link" style={{ width: 180, height: 180 }} />
+          <p style={{ ...styles.note, marginTop: 4 }}>
+            Scan with your phone&#39;s camera, or if you&#39;re reading this on
+            your phone,{' '}
+            <a href={mobile.link} style={{ color: '#4f46e5' }}>
+              open it in the LCW app
+            </a>
+            . The link is valid for 15 minutes.
+          </p>
+        </div>
+      )}
       {done && (
         <p style={styles.success}>
           Credential claimed! Check your wallet.
@@ -248,9 +293,11 @@ function ClaimCard({ claimName }: { claimName: string }) {
       )}
       {error && <p style={styles.error}>{error}</p>}
       <p style={styles.note}>
-        Uses CHAPI for wallet selection and a Verifiable Credential API
-        exchange for issuance. Register your wallet with the browser first
-        (in the LCW sandbox, use “Enable browser wallet”).
+        The web wallet uses CHAPI for wallet selection (register it with your
+        browser first — in the LCW sandbox, use “Enable browser wallet”); the
+        mobile option opens the{' '}
+        <a href="https://lcw.app" style={{ color: '#4f46e5' }}>Learner Credential Wallet app</a>.
+        Both issue over a Verifiable Credential API exchange.
       </p>
     </div>
   )
