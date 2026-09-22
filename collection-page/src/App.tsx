@@ -65,7 +65,7 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
   // Same address shape the issuer enforces server-side.
   function requireName(): boolean {
     if (!name.trim()) {
-      setNameError('Please enter the name to issue the credential to.')
+      setNameError('Please enter the name to which to issue the credential.')
       document.getElementById('recipient-name')?.focus()
       return false
     }
@@ -82,7 +82,7 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
   async function sendEmail() {
     const nameOk = requireName()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setEmailError('Please enter a valid email address to send the claim link to.')
+      setEmailError('Please enter a valid email address to which to send the claim link.')
       if (nameOk) {
         document.getElementById('recipient-email')?.focus()
       }
