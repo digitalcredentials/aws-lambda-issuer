@@ -57,9 +57,42 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
   const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [nameError, setNameError] = useState('')
+  const [emailError, setEmailError] = useState('')
   const [sentTo, setSentTo] = useState('')
 
+  // Both actions need a name; only the email action needs a (valid) address.
+  // Same address shape the issuer enforces server-side.
+  function requireName(): boolean {
+    if (!name.trim()) {
+      setNameError('Please enter the name to which to issue the credential.')
+      document.getElementById('recipient-name')?.focus()
+      return false
+    }
+    setNameError('')
+    return true
+  }
+
+  function continueToClaim() {
+    if (requireName()) {
+      onContinue(name.trim())
+    }
+  }
+
   async function sendEmail() {
+    const nameOk = requireName()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setEmailError('Please enter a valid email address to which to send the claim link.')
+      if (nameOk) {
+        document.getElementById('recipient-email')?.focus()
+      }
+      return
+    }
+    setEmailError('')
+    if (!nameOk) {
+      return
+    }
+
     setBusy(true)
     setError('')
     setSentTo('')
@@ -101,10 +134,11 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
         placeholder="Ada Lovelace"
         maxLength={100}
       />
+      {nameError && <p role="alert" style={styles.error}>{nameError}</p>}
       <button
         style={styles.button}
-        onClick={() => onContinue(name.trim())}
-        disabled={busy || !name.trim()}
+        onClick={continueToClaim}
+        disabled={busy}
       >
         Continue to claim
       </button>
@@ -119,10 +153,11 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
         onChange={(e) => setEmail(e.target.value)}
         placeholder="ada@example.com"
       />
+      {emailError && <p role="alert" style={styles.error}>{emailError}</p>}
       <button
         style={styles.secondaryButton}
         onClick={sendEmail}
-        disabled={busy || !name.trim() || !email.trim()}
+        disabled={busy}
       >
         {busy ? 'Sending…' : 'Send claim email'}
       </button>
