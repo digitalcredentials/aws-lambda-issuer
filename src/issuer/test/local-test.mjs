@@ -4,6 +4,7 @@
 //
 //   cd src/issuer && npm install && npm test
 import { DynamoDBClient, GetItemCommand, PutItemCommand, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
+import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { mockClient } from "aws-sdk-client-mock";
 import * as vc from "@digitalbazaar/vc";
 import { Ed25519Signature2020 } from "@digitalbazaar/ed25519-signature-2020";
@@ -11,6 +12,8 @@ import { Ed25519VerificationKey2020 } from "@digitalbazaar/ed25519-verification-
 
 process.env.ISSUER_SEED = "5b".repeat(32);
 process.env.TABLE_NAME = "exchanges-test";
+process.env.COLLECTION_PAGE_URL = "https://issuer.example.com";
+process.env.NOTIFY_FROM_EMAIL = "issuer@example.com";
 
 const { lambdaHandler } = await import("../app.mjs");
 const { documentLoader, issuerSuite } = await import("../issue.mjs");
@@ -29,9 +32,16 @@ ddb.on(UpdateItemCommand).callsFake((input) => {
     return {};
 });
 
-const event = ({ exchangeId, body, method = "POST", workflowId = "lcw-sandbox-badge" } = {}) => ({
+const sesMock = mockClient(SESv2Client);
+const sentEmails = [];
+sesMock.on(SendEmailCommand).callsFake((input) => {
+    sentEmails.push(input);
+    return { MessageId: "test-message" };
+});
+
+const event = ({ exchangeId, body, method = "POST", workflowId = "lcw-sandbox-badge", path } = {}) => ({
     pathParameters: { workflowId, ...(exchangeId && { exchangeId }) },
-    rawPath: `/workflows/${workflowId}/exchanges${exchangeId ? `/${exchangeId}` : ""}`,
+    rawPath: path ?? `/workflows/${workflowId}/exchanges${exchangeId ? `/${exchangeId}` : ""}`,
     headers: { host: "issuer.example.com", "x-forwarded-proto": "https" },
     requestContext: { http: { method } },
     isBase64Encoded: false,
@@ -48,8 +58,9 @@ function check(name, ok, detail = "") {
 let res = await lambdaHandler(event({ workflowId: "nope" }));
 check("unknown workflow -> 404", res.statusCode === 404);
 
-// 2. create an exchange
-res = await lambdaHandler(event());
+// 2. create an exchange, carrying the recipient name from the claim link
+const HOLDER_NAME = "Ada Lovelace";
+res = await lambdaHandler(event({ body: JSON.stringify({ name: HOLDER_NAME }) }));
 const created = JSON.parse(res.body);
 check("create exchange -> 201 with challenge + interact service", res.statusCode === 201 &&
     !!created.verifiablePresentationRequest.challenge &&
@@ -93,6 +104,7 @@ const credential = result.verifiablePresentation?.verifiableCredential?.[0];
 const { did: issuerDid } = await issuerSuite();
 check("valid DIDAuth -> 200 with issued credential", res.statusCode === 200 && !!credential);
 check("credentialSubject.id is the wallet DID", credential?.credentialSubject?.id === holderDid);
+check("credentialSubject.name is the notified name", credential?.credentialSubject?.name === HOLDER_NAME);
 check("issuer is the seed-derived DID", credential?.issuer?.id === issuerDid);
 
 // 7. the signature verifies with the same stack veri-good uses
@@ -112,6 +124,43 @@ check("completed exchange replays its result", res.statusCode === 200 &&
 // 9. unknown exchange
 res = await lambdaHandler(event({ exchangeId: "nope" }));
 check("unknown exchange -> 404", res.statusCode === 404);
+
+// 10. an exchange created without a name issues a nameless subject
+res = await lambdaHandler(event());
+const unnamed = JSON.parse(res.body);
+res = await lambdaHandler(event({ exchangeId: unnamed.exchangeId, body: JSON.stringify({
+    verifiablePresentation: await vc.signPresentation({
+        presentation: vc.createPresentation({ holder: holderDid }),
+        suite: new Ed25519Signature2020({ key: holderKey }),
+        challenge: unnamed.verifiablePresentationRequest.challenge,
+        domain: unnamed.verifiablePresentationRequest.domain,
+        documentLoader,
+    }),
+}) }));
+const namelessCred = JSON.parse(res.body).verifiablePresentation?.verifiableCredential?.[0];
+check("nameless exchange -> subject has no name", res.statusCode === 200 &&
+    namelessCred && !("name" in namelessCred.credentialSubject));
+
+// 11. the notification endpoint sends the claim email
+const notifyPath = "/workflows/lcw-sandbox-badge/notifications";
+res = await lambdaHandler(event({ path: notifyPath, body: JSON.stringify({
+    name: "Grace Hopper", email: "grace@example.com",
+}) }));
+const sent = sentEmails[0];
+check("notify -> 200 and SES send", res.statusCode === 200 && sentEmails.length === 1);
+check("email goes to the given address from NOTIFY_FROM_EMAIL",
+    sent?.Destination?.ToAddresses?.[0] === "grace@example.com" &&
+    sent?.FromEmailAddress === "issuer@example.com");
+check("email links to the collection page with the encoded name",
+    sent?.Content?.Simple?.Body?.Text?.Data?.includes(
+        "https://issuer.example.com/?name=Grace%20Hopper") ?? false);
+
+// 12. notification validation
+res = await lambdaHandler(event({ path: notifyPath, body: JSON.stringify({ name: "", email: "grace@example.com" }) }));
+check("notify without a name -> 400", res.statusCode === 400);
+res = await lambdaHandler(event({ path: notifyPath, body: JSON.stringify({ name: "Grace", email: "not-an-email" }) }));
+check("notify with a bad email -> 400", res.statusCode === 400);
+check("invalid notifications sent nothing", sentEmails.length === 1);
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
 process.exit(failures ? 1 : 0);

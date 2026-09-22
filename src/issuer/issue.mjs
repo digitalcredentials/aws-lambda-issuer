@@ -28,8 +28,10 @@ export async function issuerSuite() {
 }
 
 // The one credential this issuer knows how to issue: the LCW Sandbox Badge,
-// bound to the holder DID the DIDAuth presentation proved control of.
-export function badgeCredential({ issuerDid, holderDid }) {
+// bound to the holder DID the DIDAuth presentation proved control of. When
+// the exchange carries the recipient's name (from the notification link), it
+// goes on the credential subject.
+export function badgeCredential({ issuerDid, holderDid, holderName }) {
   return {
     "@context": [
       "https://www.w3.org/ns/credentials/v2",
@@ -49,6 +51,7 @@ export function badgeCredential({ issuerDid, holderDid }) {
     credentialSubject: {
       id: holderDid,
       type: ["AchievementSubject"],
+      ...(holderName && { name: holderName }),
       achievement: {
         id: "urn:uuid:8asd10f3-2c6b-4b1e-9a05-lcwsandbox01",
         type: ["Achievement"],
@@ -95,9 +98,10 @@ export async function verifyDidAuth({ presentation, challenge, domain }) {
   return holderDid;
 }
 
-// Issues the badge to the holder: fills in the subject DID and signs.
-export async function issueBadge({ holderDid }) {
+// Issues the badge to the holder: fills in the subject DID (and name, when
+// the exchange carries one) and signs.
+export async function issueBadge({ holderDid, holderName }) {
   const { suite, did } = await issuerSuite();
-  const credential = badgeCredential({ issuerDid: did, holderDid });
+  const credential = badgeCredential({ issuerDid: did, holderDid, holderName });
   return vc.issue({ credential, suite, documentLoader });
 }
