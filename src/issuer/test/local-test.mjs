@@ -162,5 +162,40 @@ res = await lambdaHandler(event({ path: notifyPath, body: JSON.stringify({ name:
 check("notify with a bad email -> 400", res.statusCode === 400);
 check("invalid notifications sent nothing", sentEmails.length === 1);
 
+// 13. the LCW mobile wallet's shape: a bare VP signed over the challenge only
+// (no domain), answered with the bare presentation holding the credential
+res = await lambdaHandler(event({ body: JSON.stringify({ name: HOLDER_NAME }) }));
+const mobileExchange = JSON.parse(res.body);
+const mobileVp = await vc.signPresentation({
+    presentation: vc.createPresentation({ holder: holderDid }),
+    suite: new Ed25519Signature2020({ key: holderKey }),
+    challenge: mobileExchange.verifiablePresentationRequest.challenge,
+    documentLoader,
+});
+res = await lambdaHandler(event({ exchangeId: mobileExchange.exchangeId, body: JSON.stringify(mobileVp) }));
+const mobileResult = JSON.parse(res.body);
+const mobileCred = mobileResult?.verifiableCredential?.[0];
+check("bare VP without domain -> 200 with bare VP result", res.statusCode === 200 &&
+    [mobileResult?.type ?? []].flat().includes("VerifiablePresentation") &&
+    !("verifiablePresentation" in mobileResult) && !!mobileCred);
+check("mobile-claimed credential is bound to the holder with the name",
+    mobileCred?.credentialSubject?.id === holderDid &&
+    mobileCred?.credentialSubject?.name === HOLDER_NAME);
+res = await lambdaHandler(event({ exchangeId: mobileExchange.exchangeId, body: JSON.stringify(mobileVp) }));
+check("completed mobile exchange replays the bare shape", res.statusCode === 200 &&
+    JSON.parse(res.body)?.verifiableCredential?.[0]?.id === mobileCred.id);
+
+// 14. a wrong challenge still fails without a domain
+const badMobileVp = await vc.signPresentation({
+    presentation: vc.createPresentation({ holder: holderDid }),
+    suite: new Ed25519Signature2020({ key: holderKey }),
+    challenge: "not-the-challenge",
+    documentLoader,
+});
+res = await lambdaHandler(event({ body: JSON.stringify({}) }));
+const mobileExchange2 = JSON.parse(res.body);
+res = await lambdaHandler(event({ exchangeId: mobileExchange2.exchangeId, body: JSON.stringify(badMobileVp) }));
+check("bare VP with the wrong challenge -> 400", res.statusCode === 400);
+
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
 process.exit(failures ? 1 : 0);
