@@ -25,6 +25,16 @@ Parameters:
     Type: String
     Description: Route 53 hosted zone for DomainName.
     Default: Z04250862QG6MQUAE24XV
+  NotifyFromEmail:
+    Type: String
+    Description: >
+      Address claim-notification emails are sent from. Must be covered by a
+      verified SES identity in this account/region.
+    Default: issuer@lcw-sandbox.org
+  SesIdentity:
+    Type: String
+    Description: The verified SES identity NotifyFromEmail sends under.
+    Default: lcw-sandbox.org
 
 Resources:
   IssuerHttpApi:
@@ -71,9 +81,12 @@ Resources:
           ISSUER_SEED: !Ref IssuerSeed
           TABLE_NAME: !Ref ExchangesTable
           COLLECTION_PAGE_URL: !Sub https://${DomainName}
+          NOTIFY_FROM_EMAIL: !Ref NotifyFromEmail
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ExchangesTable
+        - SESCrudPolicy:
+            IdentityName: !Ref SesIdentity
       Events:
         CreateExchange:
           Type: HttpApi
@@ -93,6 +106,12 @@ Resources:
             ApiId: !Ref IssuerHttpApi
             Path: /workflows/{workflowId}/exchanges/{exchangeId}
             Method: get
+        Notify:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref IssuerHttpApi
+            Path: /workflows/{workflowId}/notifications
+            Method: post
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
