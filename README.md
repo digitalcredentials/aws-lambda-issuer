@@ -35,10 +35,13 @@ exchange replays its result idempotently; exchanges expire after 15 minutes
 
 `collection-page/` is a small React app: one badge card with an **Add to
 Wallet** button that creates an exchange and hands its presentation request to
-the user's wallet via [CHAPI](https://chapi.io/)
-(`navigator.credentials.get`). It must be served over HTTPS (CHAPI requires a
-secure context), which is why the template fronts the bucket with CloudFront
-rather than S3 website hosting.
+the user's wallet via [CHAPI](https://chapi.io/). The call goes through
+`navigator.credentialsPolyfill.credentials.get` rather than
+`navigator.credentials.get`, which password-manager extensions (e.g.
+1Password) can lock — a call that reaches the native API throws "No credential
+type was specified in the request". The page must be served over HTTPS (CHAPI
+requires a secure context), which is why the template fronts the bucket with
+CloudFront rather than S3 website hosting.
 
 ## Parameters
 
