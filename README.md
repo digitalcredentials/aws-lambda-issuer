@@ -35,14 +35,15 @@ exchange replays its result idempotently; exchanges expire after 15 minutes
 ## The collection page
 
 `collection-page/` is a small React app with two faces. Opened plain
-(`https://issuer.lcw-sandbox.org`), it shows a form taking the name to put on
-the credential and an email address to notify; submitting hits the
-notifications endpoint, which emails a claim link back to this page with the
-name as a `?name=` query parameter. Opened through such a link, it shows the
-badge card for that name with an **Add to Wallet** button that creates an
-exchange (passing the name along, so the issued credential's subject carries
-it) and hands the presentation request to the user's wallet via
-[CHAPI](https://chapi.io/). The call goes through
+(`https://issuer.lcw-sandbox.org`), it prompts for the name to put on the
+credential: **Continue to claim** proceeds in this browser (writing `?name=`
+into the URL), or an email address turns it into a mailed claim link — the
+notifications endpoint emails a link back to this page with the name as a
+`?name=` query parameter. Opened with a name, it shows the badge card for
+that name with an **Add to Wallet** button that creates an exchange (passing
+the name along, so the issued credential's subject carries it) and hands the
+presentation request to the user's wallet via [CHAPI](https://chapi.io/). The
+call goes through
 `navigator.credentialsPolyfill.credentials.get` rather than
 `navigator.credentials.get`, which password-manager extensions (e.g.
 1Password) can lock — a call that reaches the native API throws "No credential

@@ -28,6 +28,12 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 10, background: '#4f46e5', color: '#fff', fontSize: 15,
     fontWeight: 600, cursor: 'pointer'
   },
+  secondaryButton: {
+    marginTop: 10, width: '100%', padding: '12px 16px',
+    border: '1px solid #d1d5db', borderRadius: 10, background: '#fff',
+    color: '#374151', fontSize: 15, fontWeight: 600, cursor: 'pointer'
+  },
+  divider: { margin: '22px 0 4px', fontSize: 12, color: '#9ca3af', textTransform: 'uppercase' },
   note: { marginTop: 14, fontSize: 13, color: '#6b7280' },
   error: {
     marginTop: 14, fontSize: 13, color: '#b91c1c', background: '#fef2f2',
@@ -40,17 +46,20 @@ const styles: Record<string, React.CSSProperties> = {
 }
 
 // A claim link (from the notification email) carries the recipient's name;
-// without one, the page offers the notification form instead.
-const claimName = new URLSearchParams(window.location.search).get('name')?.trim() ?? ''
+// without one, the page prompts for it first.
+const urlName = new URLSearchParams(window.location.search).get('name')?.trim() ?? ''
 
-function NotifyForm() {
+// Prompt for the name the credential should be issued to. Continue claims in
+// this browser; alternatively, an email address turns it into a mailed claim
+// link for someone else.
+function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [sentTo, setSentTo] = useState('')
 
-  async function send() {
+  async function sendEmail() {
     setBusy(true)
     setError('')
     setSentTo('')
@@ -79,10 +88,9 @@ function NotifyForm() {
         src="https://digitalcredentials.github.io/badge-assets/lcw-exp.png"
         alt="LCW Sandbox Badge"
       />
-      <h1 style={{ fontSize: 22, margin: '12px 0 4px' }}>Issue an LCW Sandbox Badge</h1>
+      <h1 style={{ fontSize: 22, margin: '12px 0 4px' }}>LCW Sandbox Badge</h1>
       <p style={{ fontSize: 14, color: '#4b5563', margin: 0 }}>
-        Enter the recipient&#39;s name — it goes on the credential — and the
-        email address to notify that the badge is ready to claim.
+        Whose name should go on the credential?
       </p>
       <label style={styles.label} htmlFor="recipient-name">Name on the credential</label>
       <input
@@ -93,6 +101,15 @@ function NotifyForm() {
         placeholder="Ada Lovelace"
         maxLength={100}
       />
+      <button
+        style={styles.button}
+        onClick={() => onContinue(name.trim())}
+        disabled={busy || !name.trim()}
+      >
+        Continue to claim
+      </button>
+
+      <p style={styles.divider} aria-hidden="true">or email a claim link</p>
       <label style={styles.label} htmlFor="recipient-email">Email to notify</label>
       <input
         id="recipient-email"
@@ -103,8 +120,8 @@ function NotifyForm() {
         placeholder="ada@example.com"
       />
       <button
-        style={styles.button}
-        onClick={send}
+        style={styles.secondaryButton}
+        onClick={sendEmail}
         disabled={busy || !name.trim() || !email.trim()}
       >
         {busy ? 'Sending…' : 'Send claim email'}
@@ -116,14 +133,14 @@ function NotifyForm() {
       )}
       {error && <p style={styles.error}>{error}</p>}
       <p style={styles.note}>
-        The email links back to this page with the name attached; the claimed
-        credential is issued to that name and bound to the claimer&#39;s wallet DID.
+        Either way, the credential is issued to that name and bound to the
+        claimer&#39;s wallet DID.
       </p>
     </div>
   )
 }
 
-function ClaimCard() {
+function ClaimCard({ claimName }: { claimName: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
@@ -138,8 +155,8 @@ function ClaimCard() {
       await polyfill.loadOnce()
 
       // A fresh exchange for this claim; its request carries the challenge,
-      // domain, and the exchange URL the wallet interacts with. The name from
-      // the claim link rides along so the issued credential carries it.
+      // domain, and the exchange URL the wallet interacts with. The name
+      // rides along so the issued credential carries it.
       const res = await fetch(`${API}/workflows/${WORKFLOW}/exchanges`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -205,9 +222,19 @@ function ClaimCard() {
 }
 
 export default function App() {
+  const [claimName, setClaimName] = useState(urlName)
+
+  function continueToClaim(name: string) {
+    // Keep the name in the URL so a refresh stays on the claim card
+    const url = new URL(window.location.href)
+    url.searchParams.set('name', name)
+    window.history.replaceState(null, '', url)
+    setClaimName(name)
+  }
+
   return (
     <div style={styles.page}>
-      {claimName ? <ClaimCard /> : <NotifyForm />}
+      {claimName ? <ClaimCard claimName={claimName} /> : <NamePrompt onContinue={continueToClaim} />}
     </div>
   )
 }
