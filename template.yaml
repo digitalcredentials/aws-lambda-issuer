@@ -35,6 +35,13 @@ Parameters:
     Type: String
     Description: The verified SES identity NotifyFromEmail sends under.
     Default: lcw-sandbox.org
+  TemplatesApiBase:
+    Type: String
+    Description: >
+      Base URL of the credential-templates API (no trailing slash). The batch
+      exchange POSTs {base}/templates/{templateId} to populate a credential at
+      collection time.
+    Default: https://f1exkuo3g0.execute-api.us-east-1.amazonaws.com/Prod
 
 Resources:
   IssuerHttpApi:
@@ -209,6 +216,80 @@ Resources:
             ApiId: !Ref IssuerHttpApi
             Path: /notify
             Method: post
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Format: "esm"
+        Platform: "node"
+        External:
+          - "@aws-sdk/*"
+        OutExtension:
+          - .js=.mjs
+        EntryPoints:
+          - app.mjs
+        Banner:
+          - js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);
+
+  # VC-API exchanges for the batch-credential workflow: a recipient's emailed
+  # credId+ctx (via the collection page) becomes a DIDAuth-bound credential,
+  # decrypted from the bundle the notify lambda staged, populated by the
+  # credential-templates API, and signed with the batch's own seed. Separate
+  # from the badge issuer; the literal path segments below take precedence
+  # over IssuerFn's {workflowId} wildcard routes (HTTP APIs route by most
+  # specific match). Shares ExchangesTable with the badge issuer; batch rows
+  # are distinguished by their credId attribute.
+  BatchExchangeFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: lcw-batch-exchange
+      Description: VCALM workflow exchanges that deliver staged batch credentials
+      CodeUri: src/batch-exchange
+      Handler: app.lambdaHandler
+      Runtime: nodejs24.x
+      MemorySize: 512
+      # Cold starts resolve DIDs and fetch JSON-LD contexts
+      Timeout: 20
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ExchangesTable
+          BUNDLES_TABLE_NAME: !Ref BundlesTable
+          TEMPLATES_API_BASE: !Ref TemplatesApiBase
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ExchangesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref BundlesTable
+        - KMSDecryptPolicy:
+            KeyId: !Ref BundlesKey
+        # Reads bundles from, and writes collection log entries to, the batch
+        # WAS space buckets (all share the dcc-was- prefix).
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: arn:aws:s3:::dcc-was-*/*
+      Events:
+        CreateBatchExchange:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref IssuerHttpApi
+            Path: /workflows/batch-credential/exchanges
+            Method: post
+        ParticipateBatchExchange:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref IssuerHttpApi
+            Path: /workflows/batch-credential/exchanges/{exchangeId}
+            Method: post
+        GetBatchExchange:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref IssuerHttpApi
+            Path: /workflows/batch-credential/exchanges/{exchangeId}
+            Method: get
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
