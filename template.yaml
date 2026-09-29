@@ -202,13 +202,19 @@ Resources:
         - KMSEncryptPolicy:
             KeyId: !Ref BundlesKey
         # Bundles and logs are written into the batch's WAS space bucket;
-        # space buckets all share the dcc-was- prefix.
+        # space buckets all share the dcc-was- prefix. ListBucket on the
+        # buckets is required for a GET of a missing key to come back as
+        # NoSuchKey (404) rather than AccessDenied (403) — the handler reads
+        # log.json and the collection descriptions before they exist.
         - Statement:
             - Effect: Allow
               Action:
                 - s3:GetObject
                 - s3:PutObject
               Resource: arn:aws:s3:::dcc-was-*/*
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: arn:aws:s3:::dcc-was-*
       Events:
         BatchNotify:
           Type: HttpApi
@@ -264,13 +270,19 @@ Resources:
         - KMSDecryptPolicy:
             KeyId: !Ref BundlesKey
         # Reads bundles from, and writes collection log entries to, the batch
-        # WAS space buckets (all share the dcc-was- prefix).
+        # WAS space buckets (all share the dcc-was- prefix). ListBucket on the
+        # buckets is required for a GET of a missing key to come back as
+        # NoSuchKey (404) rather than AccessDenied (403) — a deleted bundle
+        # must map to the clean invalid-link 400, not a 500.
         - Statement:
             - Effect: Allow
               Action:
                 - s3:GetObject
                 - s3:PutObject
               Resource: arn:aws:s3:::dcc-was-*/*
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: arn:aws:s3:::dcc-was-*
       Events:
         CreateBatchExchange:
           Type: HttpApi
