@@ -128,6 +128,103 @@ Resources:
         Banner:
           - js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);
 
+  # ---- batch notification: per-credential encrypted bundles + emails
+
+  # Encrypts the per-credential bundles staged at notification time; the
+  # per-credential context UUID (carried only in the recipient's email) is
+  # bound in as encryption context, so decryption at collection time requires
+  # presenting it back.
+  BundlesKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Encrypts staged credential bundles for batch issuance
+      EnableKeyRotation: true
+
+  BundlesKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/lcw-credential-bundles
+      TargetKeyId: !Ref BundlesKey
+
+  # credId -> batch space pointer, so the collection endpoint can find the
+  # bucket holding the (single) ciphertext copy of a bundle.
+  BundlesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: credId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: credId
+          KeyType: HASH
+
+  # Emails every recipient in a batch a collection link, staging an encrypted
+  # bundle per credential in the batch's WAS space. zcap-authenticated against
+  # the account's registered DID (the same scheme as lcw-back-end's /spaces).
+  BatchNotifyFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: lcw-batch-notify
+      Description: Stages encrypted credential bundles and emails batch recipients
+      CodeUri: src/notify
+      Handler: app.lambdaHandler
+      Runtime: nodejs24.x
+      MemorySize: 512
+      # The loop is sequential I/O per recipient (KMS + S3 + DynamoDB + SES);
+      # 300s covers several hundred recipients.
+      Timeout: 300
+      Environment:
+        Variables:
+          # Accounts and spaces tables are owned by the lcw-back-end stack.
+          TABLE_NAME: wallet-test
+          SPACES_TABLE_NAME: wallet-spaces
+          BUNDLES_TABLE_NAME: !Ref BundlesTable
+          BUNDLES_KEY_ID: !Ref BundlesKey
+          COLLECTION_PAGE_URL: !Sub https://${DomainName}
+          NOTIFY_FROM_EMAIL: !Ref NotifyFromEmail
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: wallet-test
+        - DynamoDBReadPolicy:
+            TableName: wallet-spaces
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BundlesTable
+        - SESCrudPolicy:
+            IdentityName: !Ref SesIdentity
+        - KMSEncryptPolicy:
+            KeyId: !Ref BundlesKey
+        # Bundles and logs are written into the batch's WAS space bucket;
+        # space buckets all share the dcc-was- prefix.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: arn:aws:s3:::dcc-was-*/*
+      Events:
+        BatchNotify:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref IssuerHttpApi
+            Path: /notify
+            Method: post
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Format: "esm"
+        Platform: "node"
+        External:
+          - "@aws-sdk/*"
+        OutExtension:
+          - .js=.mjs
+        EntryPoints:
+          - app.mjs
+        Banner:
+          - js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);
+
   # ---- the collection page: private bucket behind CloudFront (CHAPI needs a
   # secure context, which the S3 website endpoint cannot provide)
 
