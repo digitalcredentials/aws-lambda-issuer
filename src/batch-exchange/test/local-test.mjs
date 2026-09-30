@@ -64,9 +64,16 @@ kmsMock.on(DecryptCommand).callsFake(({ CiphertextBlob, EncryptionContext }) => 
     return { Plaintext: Buffer.from(plaintext) };
 });
 
-// In-memory batch bucket holding the staged bundle.
+// In-memory batch bucket holding the staged bundle, plus a log entry written
+// before collection histories existed (bare collectedAt, no collections
+// array) to prove the fold-in.
+const LEGACY_COLLECTED_AT = "2026-01-01T00:00:00.000Z";
 const objects = new Map([
     [`collections/${CRED_ID}/bundle.json`, JSON.stringify({ keyId: "k", ciphertext: ciphertext.toString("base64") })],
+    ["collections/logs/log.json", JSON.stringify({
+        entries: [{ type: "notification-triggered", at: LEGACY_COLLECTED_AT, recipientCount: 1 }],
+        credentials: { [CRED_ID]: { emailSentAt: LEGACY_COLLECTED_AT, collectedAt: LEGACY_COLLECTED_AT } },
+    })],
 ]);
 const s3Mock = mockClient(S3Client);
 s3Mock.on(GetObjectCommand).callsFake(({ Key }) => {
@@ -244,11 +251,18 @@ check("proof is by the bundle's per-batch DID",
         verification.verified ? "" : JSON.stringify(verification.error?.errors?.[0]?.message));
 }
 
-// 9. the collection is logged by credId only
+// 9. the collection is logged by credId only, appending to the history
 {
     const log = JSON.parse(objects.get("collections/logs/log.json"));
+    const entry = log.credentials[CRED_ID];
     check("log.json gains collectedAt for the credId",
-        typeof log.credentials[CRED_ID]?.collectedAt === "string");
+        typeof entry?.collectedAt === "string" && entry.collectedAt !== LEGACY_COLLECTED_AT);
+    check("a legacy collectedAt folds into the collections history",
+        Array.isArray(entry?.collections) &&
+        entry.collections.length === 2 &&
+        entry.collections[0] === LEGACY_COLLECTED_AT &&
+        entry.collections[1] === entry.collectedAt &&
+        entry.emailSentAt === LEGACY_COLLECTED_AT);
     check("log contains no holder or recipient data",
         !JSON.stringify(log).includes(holderDid) && !JSON.stringify(log).includes("Ada"));
 }
@@ -283,6 +297,14 @@ check("proof is by the bundle's per-batch DID",
     check("bare VP without domain -> 200 with bare VP result", res.statusCode === 200 &&
         [bareResult?.type ?? []].flat().includes("VerifiablePresentation") &&
         bareResult?.verifiableCredential?.[0]?.credentialSubject?.id === holderDid);
+
+    // Re-collection via a fresh exchange appends to the history rather than
+    // overwriting it.
+    const log = JSON.parse(objects.get("collections/logs/log.json"));
+    const entry = log.credentials[CRED_ID];
+    check("every collection is appended to the log history",
+        entry.collections.length === 3 &&
+        entry.collectedAt === entry.collections[2]);
 }
 
 // 12. a badge-issuer row (no credId) is not a batch exchange

@@ -222,7 +222,10 @@ async function populateTemplate({ templateId, issuer, fields }) {
 }
 
 // Records the collection in the batch space's log, keyed by credId only — no
-// holder data. A logging failure does not fail the (already issued) exchange.
+// holder data. Every collection appends to the entry's `collections` array
+// (a link can be collected more than once via fresh exchanges); `collectedAt`
+// tracks the most recent one. A logging failure does not fail the (already
+// issued) exchange.
 async function logCollected({ bucket, credId }) {
   try {
     let log = { entries: [], credentials: {} };
@@ -238,9 +241,16 @@ async function logCollected({ bucket, credId }) {
         throw err;
       }
     }
+    const entry = log.credentials[credId] ?? {};
+    const collectedAt = new Date().toISOString();
+    // Entries written before the history existed carry only a collectedAt;
+    // fold it in as the first element.
+    const collections = entry.collections
+      ?? (entry.collectedAt ? [entry.collectedAt] : []);
     log.credentials[credId] = {
-      ...log.credentials[credId],
-      collectedAt: new Date().toISOString(),
+      ...entry,
+      collectedAt,
+      collections: [...collections, collectedAt],
     };
     await s3.send(new PutObjectCommand({
       Bucket: bucket,
