@@ -114,10 +114,35 @@ ddb.on(UpdateItemCommand).callsFake(({ Key, ExpressionAttributeValues }) => {
     return {};
 });
 
+// The status list service, stubbed: hands out sequential positions in list 1.
+process.env.STATUS_API_BASE = "https://status.example.org";
+process.env.STATUS_API_KEY = "status-test-key";
+let allocateCalls = 0;
+
 // The templates API, stubbed: echoes a populated unsigned VC the way
 // credential-templates builds one.
 let templateCalls = 0;
-globalThis.fetch = async (url, { body } = {}) => {
+globalThis.fetch = async (url, { body, headers } = {}) => {
+    if (String(url).endsWith("/allocate")) {
+        if (headers?.["x-api-key"] !== "status-test-key") {
+            return { ok: false, status: 401 };
+        }
+        const index = 1000 + allocateCalls++;
+        return {
+            ok: true,
+            status: 201,
+            json: async () => ({
+                credentialStatus: {
+                    id: `https://status.example.org/1#${index}`,
+                    type: "BitstringStatusListEntry",
+                    statusPurpose: "revocation",
+                    statusListIndex: String(index),
+                    statusListCredential: "https://status.example.org/1",
+                },
+                revocationToken: `token-${index}`,
+            }),
+        };
+    }
     templateCalls++;
     const { issuer, fields } = JSON.parse(body);
     if (!String(url).includes("/templates/conference")) {
@@ -238,6 +263,12 @@ check("subject fields come from the populated template",
     credential?.credentialSubject?.attendedEvent?.name === "VC Summit 2026");
 check("proof is by the bundle's per-batch DID",
     credential?.proof?.verificationMethod?.startsWith(BATCH_DID));
+check("credential carries the allocated credentialStatus",
+    credential?.credentialStatus?.type === "BitstringStatusListEntry" &&
+    credential?.credentialStatus?.statusPurpose === "revocation" &&
+    credential?.credentialStatus?.statusListCredential === "https://status.example.org/1" &&
+    credential?.credentialStatus?.statusListIndex === "1000" &&
+    allocateCalls === 1);
 
 // 8. the signature verifies, against the batch DID's suite
 {
@@ -245,6 +276,9 @@ check("proof is by the bundle's per-batch DID",
         credential,
         suite: new Ed25519Signature2020(),
         documentLoader,
+        // The credential carries credentialStatus; the status fetch itself is
+        // not under test here.
+        checkStatus: async () => ({ verified: true }),
     });
     const { did } = await suiteFromSeed(SEED);
     check("issued credential signature verifies", verification.verified === true && did === BATCH_DID,
@@ -263,6 +297,10 @@ check("proof is by the bundle's per-batch DID",
         entry.collections[0] === LEGACY_COLLECTED_AT &&
         entry.collections[1] === entry.collectedAt &&
         entry.emailSentAt === LEGACY_COLLECTED_AT);
+    check("log records the revocation token for the allocated position",
+        entry?.revocationToken === "token-1000" &&
+        entry?.statusListCredential === "https://status.example.org/1" &&
+        entry?.statusListIndex === "1000");
     check("log contains no holder or recipient data",
         !JSON.stringify(log).includes(holderDid) && !JSON.stringify(log).includes("Ada"));
 }
@@ -297,6 +335,10 @@ check("proof is by the bundle's per-batch DID",
     check("bare VP without domain -> 200 with bare VP result", res.statusCode === 200 &&
         [bareResult?.type ?? []].flat().includes("VerifiablePresentation") &&
         bareResult?.verifiableCredential?.[0]?.credentialSubject?.id === holderDid);
+    // A repeat collection of the same credId reuses its one status position
+    check("re-collection reuses the credential's status position",
+        bareResult?.verifiableCredential?.[0]?.credentialStatus?.statusListIndex === "1000" &&
+        allocateCalls === 1);
 
     // Re-collection via a fresh exchange appends to the history rather than
     // overwriting it.

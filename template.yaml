@@ -198,8 +198,6 @@ Resources:
           BUNDLES_KEY_ID: !Ref BundlesKey
           COLLECTION_PAGE_URL: !Sub https://${DomainName}
           NOTIFY_FROM_EMAIL: !Ref NotifyFromEmail
-          STATUS_API_BASE: !Ref StatusApiBase
-          STATUS_API_KEY: !Ref StatusApiKey
       Policies:
         - DynamoDBReadPolicy:
             TableName: wallet-test
@@ -272,6 +270,9 @@ Resources:
           TABLE_NAME: !Ref ExchangesTable
           BUNDLES_TABLE_NAME: !Ref BundlesTable
           TEMPLATES_API_BASE: !Ref TemplatesApiBase
+          # Status positions are allocated at collection time.
+          STATUS_API_BASE: !Ref StatusApiBase
+          STATUS_API_KEY: !Ref StatusApiKey
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ExchangesTable
