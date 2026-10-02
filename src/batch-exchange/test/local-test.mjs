@@ -366,5 +366,24 @@ check("credential carries the allocated credentialStatus",
 res = await lambdaHandler(event({ exchangeId: randomUUID(), query: { ctx: CTX }, body: "" }));
 check("unknown exchange -> 404", res.statusCode === 404);
 
+// 14. a revoked credential is no longer collectable
+{
+    // The batch owner revoked it: the log entry gains revokedAt
+    const log = JSON.parse(objects.get("collections/logs/log.json"));
+    log.credentials[CRED_ID].revokedAt = new Date().toISOString();
+    objects.set("collections/logs/log.json", JSON.stringify(log));
+
+    res = await lambdaHandler(event({ body: JSON.stringify({ credId: CRED_ID, ctx: CTX }) }));
+    check("new exchange for a revoked credential -> 410", res.statusCode === 410);
+
+    // Even the already-completed exchange stops replaying its result
+    res = await lambdaHandler(event({
+        exchangeId: created.exchangeId,
+        query: { ctx: CTX },
+        body: JSON.stringify({ verifiablePresentation: await signVp(vpr.challenge, vpr.domain) }),
+    }));
+    check("replay of a completed exchange after revocation -> 410", res.statusCode === 410);
+}
+
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
 process.exit(failures ? 1 : 0);

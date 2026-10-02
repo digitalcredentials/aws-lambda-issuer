@@ -92,8 +92,14 @@ async function createExchange(event) {
   if (!UUID_RE.test(credId ?? "") || !UUID_RE.test(ctx ?? "")) {
     return json(400, { error: "credId and ctx are required (from the collection link)." });
   }
-  if (!(await getBundlePointer(credId))) {
+  const spaceUrl = await getBundlePointer(credId);
+  if (!spaceUrl) {
     return json(404, { error: "This collection link is not valid or has been revoked." });
+  }
+  // A revoked credential is no longer collectable: the link dies here, before
+  // an exchange even starts.
+  if (await isRevoked({ credId, spaceUrl })) {
+    return json(410, { error: "This credential has been revoked and can no longer be collected." });
   }
 
   const exchangeId = crypto.randomUUID();
@@ -136,6 +142,18 @@ async function createExchange(event) {
       },
     },
   });
+}
+
+// True when the batch log records the credential's status position as
+// revoked. A revoked credential is not collectable: neither a new exchange
+// nor a replay of a completed one hands it out.
+async function isRevoked({ credId, spaceUrl }) {
+  const url = spaceUrl ?? (await getBundlePointer(credId));
+  if (!url) {
+    return false;
+  }
+  const log = await readLog(url.split("/").pop());
+  return Boolean(log.credentials[credId]?.revokedAt);
 }
 
 // Loads a batch exchange row; null when absent, expired, or not a
@@ -322,6 +340,12 @@ async function participate(event, exchange) {
     return json(400, { error: "Request body must be JSON." });
   }
   const bare = isBareVp(body);
+
+  // Revocation ends collectability entirely, including replays of an exchange
+  // completed before the revocation.
+  if (await isRevoked({ credId: exchange.credId })) {
+    return json(410, { error: "This credential has been revoked and can no longer be collected." });
+  }
 
   // A completed exchange replays its stored result idempotently, in the shape
   // the caller speaks.
