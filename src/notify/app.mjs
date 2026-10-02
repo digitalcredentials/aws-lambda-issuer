@@ -209,12 +209,15 @@ export const lambdaHandler = async (event) => {
       try {
         const credId = randomUUID();
         const context = randomUUID();
+        // A row that was notified before carries the credId of that earlier
+        // staging; it is a bookkeeping key on the row, not template data.
+        const { credId: previouslyStaged, ...fields } = row;
         const plaintext = JSON.stringify({
           credId,
           batchName: batch.name,
           templateId: batch.templateId,
           issuer: batch.issuer,
-          fields: row,
+          fields,
           seed,
           did,
         });
