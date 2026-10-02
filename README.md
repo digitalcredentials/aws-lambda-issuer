@@ -7,12 +7,15 @@
 
 A Verifiable Credential issuer for the LCW sandbox, defined with
 [AWS SAM](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/what-is-sam.html):
-a Lambda that issues one credential (the **LCW Sandbox Badge**) over
-[VCALM workflow exchanges](https://www.w3.org/TR/vcalm-1.0/#workflows-and-exchanges),
-plus the S3+CloudFront-hosted React **collection page** wallets claim it from
-([https://issuer.lcw-sandbox.org](https://issuer.lcw-sandbox.org)).
+a **badge issuer** (the on-demand LCW Sandbox Badge), a **batch issuer**
+(notification emails plus collection-time issuance for batches built in the
+wallet's [batch-issuer-ui](https://github.com/digitalcredentials/batch-issuer-ui)),
+and the S3+CloudFront-hosted React **collection page** wallets claim from
+([https://issuer.lcw-sandbox.org](https://issuer.lcw-sandbox.org)). All
+issuance runs over
+[VCALM workflow exchanges](https://www.w3.org/TR/vcalm-1.0/#workflows-and-exchanges).
 
-## The exchange
+## The badge exchange
 
 One workflow, `lcw-sandbox-badge`:
 
@@ -32,11 +35,42 @@ inside a presentation envelope — the exchange's final result. A completed
 exchange replays its result idempotently; exchanges expire after 15 minutes
 (DynamoDB TTL).
 
+## Batch issuance
+
+Two more Lambdas serve batches created in the wallet's Credential Issuer
+screen; each batch lives in its own WAS space (`type: 'batch'`).
+
+- **`lcw-batch-notify`** (`POST /notify`, `src/notify/`): a zCap invocation
+  signed by the wallet's registered DID, whose batch space must be registered
+  to that DID. For each recipient row it stages a KMS-encrypted bundle (the
+  template id, issuer details, CSV fields, and a per-run signing seed) at
+  `collections/{credId}/bundle.json` in the batch space, records a
+  `credId → space` pointer in the bundles table, emails the recipient a
+  collection link carrying `credId` and the decryption context `ctx` (which is
+  never stored), and appends to the space's `logs/log.json` — by credId only,
+  no recipient data.
+- **`lcw-batch-exchange`** (`/workflows/batch-credential/exchanges...`,
+  `src/batch-exchange/`): the collection page drives it like the badge
+  exchange. At collection time it decrypts the bundle (the `ctx` from the
+  link's query string is bound into the KMS encryption context), populates the
+  template through the
+  [credential-templates](https://github.com/digitalcredentials/credential-templates)
+  API, allocates a
+  [Bitstring Status List](https://github.com/digitalcredentials/status-list-lambda)
+  position (`credentialStatus` goes on the credential; the revocation token
+  into the batch log — a repeat collection reuses the credential's one
+  position), binds the credential to the holder's DIDAuth-proved DID, and
+  signs with the batch's seed-derived `did:key`. A credential whose log entry
+  is marked revoked is no longer collectable: new exchanges and replays both
+  answer 410.
+
 ## The collection page
 
-`collection-page/` is a small React app with two faces. Opened plain
-(`https://issuer.lcw-sandbox.org`), it prompts for the name to put on the
-credential: **Continue to claim** proceeds in this browser (writing `?name=`
+`collection-page/` is a small React app with two faces: the badge flow below,
+and the batch flow — opened with `?credId=...&ctx=...` from a notification
+email, it drives the batch-credential exchange for that one staged credential.
+Opened plain (`https://issuer.lcw-sandbox.org`), it prompts for the name to
+put on the badge: **Continue to claim** proceeds in this browser (writing `?name=`
 into the URL), or an email address turns it into a mailed claim link — the
 notifications endpoint emails a link back to this page with the name as a
 `?name=` query parameter. Opened with a name, it shows the badge card for
@@ -68,6 +102,11 @@ CloudFront rather than S3 website hosting.
   emails are sent from (default `issuer@lcw-sandbox.org`) and the verified SES
   identity it sends under (default `lcw-sandbox.org`, the domain identity the
   lcw-back-end stack verified).
+- **`TemplatesApiBase`** — the credential-templates API the batch exchange
+  populates credentials from.
+- **`StatusApiBase`** / **`StatusApiKey`** — the Bitstring Status List service
+  (default `https://status.lcw-sandbox.org`) and its `/allocate` key (NoEcho),
+  used at collection time.
 
 ## Deploy
 
@@ -85,16 +124,19 @@ aws cloudfront create-invalidation --distribution-id <CollectionPageDistribution
 ## Test
 
 ```bash
-cd src/issuer
-npm install
-npm test
+cd src/issuer && npm install && npm test
+cd src/batch-exchange && npm install && npm test
 ```
 
-Runs the whole exchange in-process with a mocked DynamoDB, playing the wallet
-side with its own `did:key`: create → DIDAuthentication request → a wrong
-challenge is rejected → a valid DIDAuth presentation gets the badge, bound to
-the holder and signed by the seed-derived issuer DID → the signature verifies
-→ the completed exchange replays its result.
+Each runs its whole exchange in-process with mocked AWS clients, playing the
+wallet side with its own `did:key`. The badge suite: create →
+DIDAuthentication request → a wrong challenge is rejected → a valid DIDAuth
+presentation gets the badge, bound to the holder and signed by the
+seed-derived issuer DID → the signature verifies → the completed exchange
+replays its result. The batch suite additionally covers the ctx-bound
+decryption, template population, the status position (allocated once,
+recorded in the log, reused on re-collection), and that a revoked credential
+is no longer collectable.
 
 The lcw-front-end repo's `npm run test:claim` drives the same flow against
 the deployed API using the wallet's own signing stack.
