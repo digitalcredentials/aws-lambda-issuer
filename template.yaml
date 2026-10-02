@@ -25,6 +25,14 @@ Parameters:
     Type: String
     Description: Route 53 hosted zone for DomainName.
     Default: Z04250862QG6MQUAE24XV
+  StatusApiBase:
+    Type: String
+    Description: Base URL of the Bitstring Status List service (no trailing slash).
+    Default: https://status.lcw-sandbox.org
+  StatusApiKey:
+    Type: String
+    NoEcho: true
+    Description: The status list service's x-api-key for /allocate.
   NotifyFromEmail:
     Type: String
     Description: >
@@ -190,6 +198,8 @@ Resources:
           BUNDLES_KEY_ID: !Ref BundlesKey
           COLLECTION_PAGE_URL: !Sub https://${DomainName}
           NOTIFY_FROM_EMAIL: !Ref NotifyFromEmail
+          STATUS_API_BASE: !Ref StatusApiBase
+          STATUS_API_KEY: !Ref StatusApiKey
       Policies:
         - DynamoDBReadPolicy:
             TableName: wallet-test

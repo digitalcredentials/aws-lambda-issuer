@@ -28,6 +28,8 @@ const BUNDLES_TABLE = process.env.BUNDLES_TABLE_NAME;
 const BUNDLES_KEY_ID = process.env.BUNDLES_KEY_ID;
 const COLLECTION_PAGE_URL = (process.env.COLLECTION_PAGE_URL ?? "").replace(/\/+$/, "");
 const NOTIFY_FROM_EMAIL = process.env.NOTIFY_FROM_EMAIL;
+const STATUS_API_BASE = (process.env.STATUS_API_BASE ?? "").replace(/\/+$/, "");
+const STATUS_API_KEY = process.env.STATUS_API_KEY;
 
 // KMS Encrypt takes at most 4096 plaintext bytes; bundles are small (one CSV
 // row plus a seed), so hitting this means a runaway row, not a design problem.
@@ -47,6 +49,20 @@ function parseBody(event) {
     return {};
   }
   return JSON.parse(raw);
+}
+
+// Reserves a Bitstring Status List position for one credential. The returned
+// credentialStatus is embedded in the credential at collection time; the
+// revocationToken goes into the batch log so the batch owner can revoke.
+async function allocateStatus() {
+  const response = await fetch(`${STATUS_API_BASE}/allocate`, {
+    method: "POST",
+    headers: { "x-api-key": STATUS_API_KEY },
+  });
+  if (!response.ok) {
+    throw new Error(`Status allocation failed (${response.status})`);
+  }
+  return response.json();
 }
 
 function escapeHtml(text) {
@@ -157,13 +173,14 @@ export const lambdaHandler = async (event) => {
     return json(401, { error: "Unauthorized." });
   }
 
-  // The batch space must be registered to this account as a batch space; 404
-  // otherwise so nothing is revealed about other accounts' spaces.
+  // The batch space must be registered to this account's DID as a batch
+  // space (registry rows are keyed to the controller DID and carry no email);
+  // 404 otherwise so nothing is revealed about other accounts' spaces.
   const { Item: spaceRow } = await dynamo.send(new GetItemCommand({
     TableName: SPACES_TABLE,
     Key: { spaceURL: { S: batch.spaceUrl } },
   }));
-  if (!spaceRow || spaceRow.email?.S !== email || spaceRow.type?.S !== "batch") {
+  if (!spaceRow || spaceRow.did?.S?.split("#")[0] !== registeredDid || spaceRow.type?.S !== "batch") {
     return json(404, { error: "No such batch space." });
   }
   const bucket = batch.spaceUrl.split("/").pop();
@@ -203,6 +220,18 @@ export const lambdaHandler = async (event) => {
       try {
         const credId = randomUUID();
         const context = randomUUID();
+
+        // One status list position per credential; allocation failure fails
+        // the row visibly rather than issuing an irrevocable credential.
+        let status;
+        try {
+          status = await allocateStatus();
+        } catch (err) {
+          console.error(`Status allocation failed for row ${index}:`, err);
+          failures.push({ row: index, reason: "Failed to allocate a revocation-status position." });
+          continue;
+        }
+
         const plaintext = JSON.stringify({
           credId,
           batchName: batch.name,
@@ -211,6 +240,7 @@ export const lambdaHandler = async (event) => {
           fields: row,
           seed,
           did,
+          credentialStatus: status.credentialStatus,
         });
         if (Buffer.byteLength(plaintext) > KMS_PLAINTEXT_LIMIT) {
           failures.push({ row: index, reason: "Credential data too large to encrypt." });
@@ -248,8 +278,15 @@ export const lambdaHandler = async (event) => {
           collectUrl,
         }));
 
-        // The log records progress by credId only - no recipient data.
-        credentials[credId] = { emailSentAt: new Date().toISOString() };
+        // The log records progress by credId only - no recipient data. The
+        // revocation token is the bearer capability for revoking this one
+        // credential's status position; the batch owner's space is its home.
+        credentials[credId] = {
+          emailSentAt: new Date().toISOString(),
+          revocationToken: status.revocationToken,
+          statusListCredential: status.credentialStatus.statusListCredential,
+          statusListIndex: status.credentialStatus.statusListIndex,
+        };
       } catch (err) {
         console.error(`Notify failed for row ${index}:`, err);
         failures.push({ row: index, reason: "Failed to stage or send." });

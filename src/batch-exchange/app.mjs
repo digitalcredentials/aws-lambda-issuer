@@ -315,6 +315,11 @@ async function participate(event, exchange) {
       ...populated.credentialSubject,
       id: holderDid,
     };
+    // The Bitstring Status List position allocated at notification time; the
+    // VC v2 context already carries the BitstringStatusListEntry terms.
+    if (bundle.credentialStatus) {
+      populated.credentialStatus = bundle.credentialStatus;
+    }
     // Templates use issuer-defined terms (attendedEvent, degree, ...) beyond
     // the VC v2 context. An explicit @vocab entry maps them to the
     // issuer-dependent namespace so JSON-LD canonization accepts them; the
