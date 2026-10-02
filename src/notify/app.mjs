@@ -157,13 +157,14 @@ export const lambdaHandler = async (event) => {
     return json(401, { error: "Unauthorized." });
   }
 
-  // The batch space must be registered to this account as a batch space; 404
-  // otherwise so nothing is revealed about other accounts' spaces.
+  // The batch space must be registered to this account's DID as a batch
+  // space (registry rows are keyed to the controller DID and carry no email);
+  // 404 otherwise so nothing is revealed about other accounts' spaces.
   const { Item: spaceRow } = await dynamo.send(new GetItemCommand({
     TableName: SPACES_TABLE,
     Key: { spaceURL: { S: batch.spaceUrl } },
   }));
-  if (!spaceRow || spaceRow.email?.S !== email || spaceRow.type?.S !== "batch") {
+  if (!spaceRow || spaceRow.did?.S?.split("#")[0] !== registeredDid || spaceRow.type?.S !== "batch") {
     return json(404, { error: "No such batch space." });
   }
   const bucket = batch.spaceUrl.split("/").pop();
@@ -248,7 +249,9 @@ export const lambdaHandler = async (event) => {
           collectUrl,
         }));
 
-        // The log records progress by credId only - no recipient data.
+        // The log records progress by credId only - no recipient data. The
+        // credential's status position is allocated (and its revocation token
+        // recorded here) at collection time, by the batch-exchange lambda.
         credentials[credId] = { emailSentAt: new Date().toISOString() };
       } catch (err) {
         console.error(`Notify failed for row ${index}:`, err);

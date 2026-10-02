@@ -92,8 +92,14 @@ async function createExchange(event) {
   if (!UUID_RE.test(credId ?? "") || !UUID_RE.test(ctx ?? "")) {
     return json(400, { error: "credId and ctx are required (from the collection link)." });
   }
-  if (!(await getBundlePointer(credId))) {
+  const spaceUrl = await getBundlePointer(credId);
+  if (!spaceUrl) {
     return json(404, { error: "This collection link is not valid or has been revoked." });
+  }
+  // A revoked credential is no longer collectable: the link dies here, before
+  // an exchange even starts.
+  if (await isRevoked({ credId, spaceUrl })) {
+    return json(410, { error: "This credential has been revoked and can no longer be collected." });
   }
 
   const exchangeId = crypto.randomUUID();
@@ -136,6 +142,18 @@ async function createExchange(event) {
       },
     },
   });
+}
+
+// True when the batch log records the credential's status position as
+// revoked. A revoked credential is not collectable: neither a new exchange
+// nor a replay of a completed one hands it out.
+async function isRevoked({ credId, spaceUrl }) {
+  const url = spaceUrl ?? (await getBundlePointer(credId));
+  if (!url) {
+    return false;
+  }
+  const log = await readLog(url.split("/").pop());
+  return Boolean(log.credentials[credId]?.revokedAt);
 }
 
 // Loads a batch exchange row; null when absent, expired, or not a
@@ -221,26 +239,69 @@ async function populateTemplate({ templateId, issuer, fields }) {
   return response.json();
 }
 
+// The batch space's activity log ({} when none exists yet).
+async function readLog(bucket) {
+  try {
+    const { Body } = await s3.send(new GetObjectCommand({
+      Bucket: bucket,
+      Key: "collections/logs/log.json",
+    }));
+    const log = JSON.parse(await Body.transformToString());
+    log.entries ??= [];
+    log.credentials ??= {};
+    return log;
+  } catch (err) {
+    if (err.name !== "NoSuchKey") {
+      throw err;
+    }
+    return { entries: [], credentials: {} };
+  }
+}
+
+// Rebuilds the credentialStatus object from a log entry's recorded
+// allocation, so a repeat collection (a fresh exchange for the same link)
+// reuses the credential's one status position instead of allocating another.
+function statusFromLogEntry(entry) {
+  if (!entry?.statusListCredential || !entry?.statusListIndex) {
+    return null;
+  }
+  return {
+    id: `${entry.statusListCredential}#${entry.statusListIndex}`,
+    type: "BitstringStatusListEntry",
+    statusPurpose: "revocation",
+    statusListIndex: entry.statusListIndex,
+    statusListCredential: entry.statusListCredential,
+  };
+}
+
+// Reserves a Bitstring Status List position at collection time, so positions
+// exist only for credentials actually issued. The revocation token goes into
+// the batch log (the batch owner's space) via logCollected.
+async function allocateStatus() {
+  const base = (process.env.STATUS_API_BASE ?? "").replace(/\/+$/, "");
+  const response = await fetch(`${base}/allocate`, {
+    method: "POST",
+    headers: { "x-api-key": process.env.STATUS_API_KEY },
+  });
+  if (!response.ok) {
+    throw Object.assign(
+      new Error("Could not allocate a revocation-status position; try again."),
+      { statusCode: 502 }
+    );
+  }
+  return response.json();
+}
+
 // Records the collection in the batch space's log, keyed by credId only — no
 // holder data. Every collection appends to the entry's `collections` array
 // (a link can be collected more than once via fresh exchanges); `collectedAt`
-// tracks the most recent one. A logging failure does not fail the (already
-// issued) exchange.
-async function logCollected({ bucket, credId }) {
+// tracks the most recent one, and a first collection's status allocation adds
+// the revocation token. A logging failure does not fail the (already issued)
+// exchange — but it is loud, because losing a freshly allocated token leaves
+// the credential irrevocable.
+async function logCollected({ bucket, credId, status }) {
   try {
-    let log = { entries: [], credentials: {} };
-    try {
-      const { Body } = await s3.send(new GetObjectCommand({
-        Bucket: bucket,
-        Key: "collections/logs/log.json",
-      }));
-      log = JSON.parse(await Body.transformToString());
-      log.credentials ??= {};
-    } catch (err) {
-      if (err.name !== "NoSuchKey") {
-        throw err;
-      }
-    }
+    const log = await readLog(bucket);
     const entry = log.credentials[credId] ?? {};
     const collectedAt = new Date().toISOString();
     // Entries written before the history existed carry only a collectedAt;
@@ -249,6 +310,11 @@ async function logCollected({ bucket, credId }) {
       ?? (entry.collectedAt ? [entry.collectedAt] : []);
     log.credentials[credId] = {
       ...entry,
+      ...(status && {
+        revocationToken: status.revocationToken,
+        statusListCredential: status.credentialStatus.statusListCredential,
+        statusListIndex: status.credentialStatus.statusListIndex,
+      }),
       collectedAt,
       collections: [...collections, collectedAt],
     };
@@ -260,6 +326,9 @@ async function logCollected({ bucket, credId }) {
     }));
   } catch (err) {
     console.error(`Failed to log collection of ${credId}:`, err);
+    if (status) {
+      console.error(`LOST revocation token for ${credId}; its position cannot be revoked.`);
+    }
   }
 }
 
@@ -271,6 +340,12 @@ async function participate(event, exchange) {
     return json(400, { error: "Request body must be JSON." });
   }
   const bare = isBareVp(body);
+
+  // Revocation ends collectability entirely, including replays of an exchange
+  // completed before the revocation.
+  if (await isRevoked({ credId: exchange.credId })) {
+    return json(410, { error: "This credential has been revoked and can no longer be collected." });
+  }
 
   // A completed exchange replays its stored result idempotently, in the shape
   // the caller speaks.
@@ -326,8 +401,16 @@ async function participate(event, exchange) {
         { "@vocab": "https://www.w3.org/ns/credentials/issuer-dependent#" },
       ];
     }
+    // The credential's Bitstring Status List position, allocated at collection
+    // time (so positions exist only for credentials actually issued) and
+    // reused when the same credId is collected again. The VC v2 context
+    // already carries the BitstringStatusListEntry terms.
+    const existing = statusFromLogEntry((await readLog(bucket)).credentials[exchange.credId]);
+    const status = existing ? null : await allocateStatus();
+    populated.credentialStatus = existing ?? status.credentialStatus;
+
     credential = await signCredential({ credential: populated, seedHex: bundle.seed });
-    await logCollected({ bucket, credId: exchange.credId });
+    await logCollected({ bucket, credId: exchange.credId, status });
   } catch (err) {
     if (err.statusCode) {
       return json(err.statusCode, { error: err.message });
