@@ -194,6 +194,11 @@ export const lambdaHandler = async (event) => {
     const issuerName = batch.issuer?.name || batch.name || "The issuer";
     const failures = [];
     const credentials = {};
+    // credId -> row index, returned to the caller only (never logged): the
+    // batch owner's UI joins it with the batch document's own rows to show
+    // which credential belongs to whom, while the log stays free of
+    // recipient data.
+    const recipientRows = {};
 
     for (const [index, row] of batch.rows.entries()) {
       const recipientEmail = (row.recipientEmail ?? "").trim();
@@ -253,6 +258,7 @@ export const lambdaHandler = async (event) => {
         // credential's status position is allocated (and its revocation token
         // recorded here) at collection time, by the batch-exchange lambda.
         credentials[credId] = { emailSentAt: new Date().toISOString() };
+        recipientRows[credId] = index;
       } catch (err) {
         console.error(`Notify failed for row ${index}:`, err);
         failures.push({ row: index, reason: "Failed to stage or send." });
@@ -262,7 +268,7 @@ export const lambdaHandler = async (event) => {
     Object.assign(log.credentials, credentials);
     await writeJson(bucket, "collections/logs/log.json", log);
 
-    return json(200, { sent: Object.keys(credentials).length, failures, credentials });
+    return json(200, { sent: Object.keys(credentials).length, failures, credentials, recipientRows });
   } catch (err) {
     console.error(`Notify failed for ${batch.spaceUrl}:`, err);
     return json(500, { error: "Server error." });
