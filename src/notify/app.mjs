@@ -16,6 +16,7 @@ import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { KMSClient, EncryptCommand } from "@aws-sdk/client-kms";
 import { Ed25519VerificationKey } from "@interop/ed25519-verification-key";
 import { verifyAccountInvocation } from "./verify.mjs";
+import { emailHtml, escapeHtml } from "./email.mjs";
 
 const dynamo = new DynamoDBClient({});
 const s3 = new S3Client({});
@@ -47,10 +48,6 @@ function parseBody(event) {
     return {};
   }
   return JSON.parse(raw);
-}
-
-function escapeHtml(text) {
-  return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
 async function readJson(bucket, key) {
@@ -110,11 +107,15 @@ function notificationEmail({ recipientEmail, recipientName, issuerName, collectU
               `— ${issuerName}`,
           },
           Html: {
-            Data:
-              `<p>${escapeHtml(greeting)}</p>` +
-              `<p><strong>${escapeHtml(issuerName)}</strong> has issued you a credential, and it is ready for you to collect.</p>` +
-              `<p><a href="${collectUrl}">Collect your credential</a></p>` +
-              `<p>— ${escapeHtml(issuerName)}</p>`,
+            Data: emailHtml({
+              title: "A credential is ready for you",
+              paragraphs: [
+                escapeHtml(greeting),
+                `<strong>${escapeHtml(issuerName)}</strong> has issued you a credential, and it is ready for you to collect into your Learner Credential Wallet.`,
+              ],
+              button: { label: "Collect my credential", url: collectUrl },
+              after: `<p style="font-size:14px;color:#6b7280;">&mdash; ${escapeHtml(issuerName)}</p>`,
+            }),
           },
         },
       },
