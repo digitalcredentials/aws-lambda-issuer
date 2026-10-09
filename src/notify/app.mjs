@@ -176,6 +176,9 @@ export const lambdaHandler = async (event) => {
   try {
     // One signing seed for the whole notification run; each bundle carries it
     // so the credential can be signed at collection time.
+    const achievementId = typeof batch.achievementId === "string" && batch.achievementId
+      ? batch.achievementId
+      : `urn:uuid:${randomUUID()}`;
     const seedBytes = randomBytes(32);
     const seed = seedBytes.toString("hex");
     const signingKey = await Ed25519VerificationKey.generate({ seed: new Uint8Array(seedBytes) });
@@ -221,6 +224,11 @@ export const lambdaHandler = async (event) => {
           batchName: batch.name,
           templateId: batch.templateId,
           issuer: batch.issuer,
+          // The credential's image and the achievement id shared by every
+          // credential in the batch (the panel mints one per batch; a batch
+          // from before it carried one gets one per notification run).
+          ...(batch.image && { image: batch.image }),
+          achievementId,
           fields,
           seed,
           did,

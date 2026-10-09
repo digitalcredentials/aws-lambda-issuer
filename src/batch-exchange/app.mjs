@@ -223,11 +223,11 @@ async function loadBundle({ credId, ctx }) {
 
 // Populates the credential template with the bundle's issuer + fields via the
 // credential-templates API (built for exactly this call).
-async function populateTemplate({ templateId, issuer, fields }) {
+async function populateTemplate({ templateId, issuer, fields, image, achievementId }) {
   const response = await fetch(`${TEMPLATES_API_BASE}/templates/${templateId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ issuer, fields }),
+    body: JSON.stringify({ issuer, fields, ...(image && { image }), ...(achievementId && { achievementId }) }),
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -380,27 +380,21 @@ async function participate(event, exchange) {
   let credential;
   try {
     const { bundle, bucket } = await loadBundle({ credId: exchange.credId, ctx });
+    // The templates API builds an Open Badges 3.0 credential whose every
+    // term the VC v2 and Open Badges contexts define, so it canonicalizes
+    // for signing as it comes.
     const populated = await populateTemplate({
       templateId: bundle.templateId,
       issuer: bundle.issuer,
       fields: bundle.fields,
+      image: bundle.image,
+      achievementId: bundle.achievementId,
     });
     populated.id = `urn:uuid:${exchange.credId}`;
     populated.credentialSubject = {
       ...populated.credentialSubject,
       id: holderDid,
     };
-    // Templates use issuer-defined terms (attendedEvent, degree, ...) beyond
-    // the VC v2 context. An explicit @vocab entry maps them to the
-    // issuer-dependent namespace so JSON-LD canonization accepts them; the
-    // entry travels inside the credential, so verifiers canonize identically.
-    const contexts = [populated["@context"] ?? []].flat();
-    if (!contexts.some((c) => typeof c === "object" && c !== null && "@vocab" in c)) {
-      populated["@context"] = [
-        ...contexts,
-        { "@vocab": "https://www.w3.org/ns/credentials/issuer-dependent#" },
-      ];
-    }
     // The credential's Bitstring Status List position, allocated at collection
     // time (so positions exist only for credentials actually issued) and
     // reused when the same credId is collected again. The VC v2 context
