@@ -50,7 +50,7 @@ function resetMocks({ registeredDid, spaceRow } = {}) {
   );
   ddbMock.on(GetItemCommand, { TableName: "wallet-spaces" }).resolves(
     spaceRow === undefined
-      ? { Item: { spaceURL: { S: SPACE_URL }, email: { S: EMAIL }, type: { S: "batch" } } }
+      ? { Item: { spaceURL: { S: SPACE_URL }, did: { S: registeredDid ?? "" }, type: { L: [{ S: "Space" }, { S: "BatchSpace" }] } } }
       : spaceRow
         ? { Item: spaceRow }
         : {}
@@ -139,14 +139,14 @@ check("email not registered -> 401", res.statusCode === 401);
 
 resetMocks({
   registeredDid: did,
-  spaceRow: { spaceURL: { S: SPACE_URL }, email: { S: "other@example.com" }, type: { S: "batch" } },
+  spaceRow: { spaceURL: { S: SPACE_URL }, did: { S: "did:key:z6MkfDLjE5Kip9E7YRitEbrNAcCYi2AviAY8Ny7hoYnCSgav" }, type: { L: [{ S: "Space" }, { S: "BatchSpace" }] } },
 });
 res = await lambdaHandler(await signedEvent({ email: EMAIL, batch: batch(ROWS) }));
 check("space owned by another account -> 404", res.statusCode === 404);
 
 resetMocks({
   registeredDid: did,
-  spaceRow: { spaceURL: { S: SPACE_URL }, email: { S: EMAIL }, type: { S: "credential" } },
+  spaceRow: { spaceURL: { S: SPACE_URL }, did: { S: did }, type: { L: [{ S: "Space" }] } },
 });
 res = await lambdaHandler(await signedEvent({ email: EMAIL, batch: batch(ROWS) }));
 check("credential space -> 404", res.statusCode === 404);
@@ -213,10 +213,9 @@ check("happy path -> 200 with 2 sent", res.statusCode === 200 && result.sent ===
   check("context UUID appears only in the email",
     !res.body.includes(ctxInEmail) && !objects.get("collections/logs/log.json").includes(ctxInEmail));
 
-  const specials = ["collections/logs/description.json", "collections/batch/description.json"]
-    .map((k) => JSON.parse(objects.get(k) ?? "{}"));
-  check("logs and batch collections marked special",
-    specials.every((d) => d.special === true));
+  const logsMeta = JSON.parse(objects.get("meta/logs.json") ?? "null");
+  check("logs collection has its metadata object",
+    logsMeta?.name === "Logs" && Array.isArray(logsMeta.type));
 
   const log = JSON.parse(objects.get("collections/logs/log.json"));
   check("log has a notification-triggered entry and per-credId records",

@@ -4,7 +4,7 @@
 //
 // The request is a zcap invocation of its own URL signed by the DID registered
 // for the email (the wallet's session key), and the batch space named in the
-// posted batch must be registered to that account with type 'batch'.
+// posted batch must be registered to that account as a batch space.
 //
 // Must be evaluated before @interop/jsonld (CJS) is pulled in below, which
 // require()s this ESM package mid-graph and hits a TDZ error otherwise.
@@ -74,23 +74,21 @@ async function writeJson(bucket, key, value) {
   }));
 }
 
-// Marks the batch space's bookkeeping collections as special: `logs` (created
-// here) and `batch` (created by the batch-issuer panel), so UIs can tell them
-// apart from ordinary credential collections.
-async function markSpecialCollections(bucket) {
-  await writeJson(bucket, "collections/logs/description.json", {
+// Gives the batch space's `logs` collection (created here, written directly
+// to the bucket) its Collection Metadata object in the WAS v0.5 layout, so
+// it is listed by name; an existing object is left alone. The `batch`
+// collection is created by the batch-issuer panel through the server.
+async function ensureLogsMetadata(bucket) {
+  if ((await readJson(bucket, "meta/logs.json")) !== null) {
+    return;
+  }
+  const now = new Date().toISOString();
+  await writeJson(bucket, "meta/logs.json", {
     id: "logs",
+    type: ["Collection"],
     name: "Logs",
-    type: ["Collection"],
-    special: true,
-  });
-  const batchDescription = await readJson(bucket, "collections/batch/description.json");
-  await writeJson(bucket, "collections/batch/description.json", {
-    id: "batch",
-    name: "Batch",
-    type: ["Collection"],
-    ...batchDescription,
-    special: true,
+    createdAt: now,
+    updatedAt: now,
   });
 }
 
@@ -164,7 +162,12 @@ export const lambdaHandler = async (event) => {
     TableName: SPACES_TABLE,
     Key: { spaceURL: { S: batch.spaceUrl } },
   }));
-  if (!spaceRow || spaceRow.did?.S?.split("#")[0] !== registeredDid || spaceRow.type?.S !== "batch") {
+  // The registry's `type` is the Space's type array; a batch space carries
+  // "BatchSpace" (rows from before v0.5 held the string 'batch').
+  const spaceTypes = spaceRow?.type?.L
+    ? spaceRow.type.L.map((entry) => entry.S)
+    : spaceRow?.type?.S === "batch" ? ["Space", "BatchSpace"] : ["Space"];
+  if (!spaceRow || spaceRow.did?.S?.split("#")[0] !== registeredDid || !spaceTypes.includes("BatchSpace")) {
     return json(404, { error: "No such batch space." });
   }
   const bucket = batch.spaceUrl.split("/").pop();
@@ -177,7 +180,7 @@ export const lambdaHandler = async (event) => {
     const signingKey = await Ed25519VerificationKey.generate({ seed: new Uint8Array(seedBytes) });
     const did = `did:key:${signingKey.fingerprint()}`;
 
-    await markSpecialCollections(bucket);
+    await ensureLogsMetadata(bucket);
 
     const log = (await readJson(bucket, "collections/logs/log.json")) ?? {
       entries: [],

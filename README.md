@@ -38,7 +38,7 @@ exchange replays its result idempotently; exchanges expire after 15 minutes
 ## Batch issuance
 
 Two more Lambdas serve batches created in the wallet's Credential Issuer
-screen; each batch lives in its own WAS space (`type: 'batch'`).
+screen; each batch lives in its own WAS space (a Space whose type array carries `BatchSpace`).
 
 - **`lcw-batch-notify`** (`POST /notify`, `src/notify/`): a zCap invocation
   signed by the wallet's registered DID, whose batch space must be registered
