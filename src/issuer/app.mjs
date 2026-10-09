@@ -6,6 +6,7 @@ import {
 } from "@aws-sdk/client-dynamodb";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { verifyDidAuth, issueBadge } from "./issue.mjs";
+import { emailHtml, escapeHtml } from "./email.mjs";
 
 const dynamo = new DynamoDBClient({});
 const ses = new SESv2Client({});
@@ -91,12 +92,16 @@ async function notify(event) {
                 `— LCW Sandbox Issuer`,
             },
             Html: {
-              Data:
-                `<p>Hello ${escapeHtml(name)},</p>` +
-                `<p>A credential — the <strong>LCW Sandbox Badge</strong>, issued to ${escapeHtml(name)} — is ready for you to collect.</p>` +
-                `<p><a href="${claimUrl}">Open the collection page</a> and click <strong>Add to Wallet</strong> to claim it into your Learner Credential Wallet.</p>` +
-                `<p>You'll need a wallet registered with your browser (in the LCW sandbox, use "Enable browser wallet").</p>` +
-                `<p>— LCW Sandbox Issuer</p>`,
+              Data: emailHtml({
+                title: "Your LCW Sandbox Badge is ready",
+                paragraphs: [
+                  `Hello ${escapeHtml(name)},`,
+                  `A credential &mdash; the <strong>LCW Sandbox Badge</strong>, issued to ${escapeHtml(name)} &mdash; is ready for you to collect.`,
+                  `Open the collection page and click <strong>Add to Wallet</strong> to claim it into your Learner Credential Wallet. You will need a wallet registered with your browser (in the LCW sandbox, use &ldquo;Enable browser wallet&rdquo;).`,
+                ],
+                button: { label: "Open the collection page", url: claimUrl },
+                after: `<p style="font-size:14px;color:#6b7280;">&mdash; LCW Sandbox Issuer</p>`,
+              }),
             },
           },
         },
@@ -104,10 +109,6 @@ async function notify(event) {
     })
   );
   return json(200, { sent: true });
-}
-
-function escapeHtml(text) {
-  return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
 async function createExchange(event) {
