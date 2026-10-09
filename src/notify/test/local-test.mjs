@@ -92,7 +92,9 @@ const batch = (rows) => ({
   spaceUrl: SPACE_URL,
   name: "VC Summit 2026 attendance",
   templateId: "conference",
-  issuer: { name: "VC Summit", url: "https://summit.example.org" },
+  issuer: { name: "VC Summit", url: "https://summit.example.org", image: "https://summit.example.org/logo.png" },
+  image: "https://summit.example.org/badge.png",
+  achievementId: "urn:uuid:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
   rows,
 });
 
@@ -182,6 +184,9 @@ check("happy path -> 200 with 2 sent", res.statusCode === 200 && result.sent ===
       ? Buffer.from(JSON.parse(objects.get(bundleKeys[0])).ciphertext, "base64").toString().slice("enc:".length)
       : "{}"
   );
+  check("bundle carries the credential image and the batch's achievement id",
+    bundle.image === "https://summit.example.org/badge.png" &&
+    bundle.achievementId === "urn:uuid:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
   check("bundle carries fields, seed, and did",
     bundle.templateId === "conference" &&
     bundle.fields?.recipientEmail?.endsWith("@example.com") &&

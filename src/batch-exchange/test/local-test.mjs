@@ -42,6 +42,8 @@ const BUNDLE = {
     batchName: "VC Summit 2026 attendance",
     templateId: "conference",
     issuer: { name: "VC Summit", url: "https://summit.example.org" },
+    image: "https://summit.example.org/badge.png",
+    achievementId: "urn:uuid:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
     fields: { recipientName: "Ada Lovelace", conferenceName: "VC Summit 2026" },
     seed: SEED,
     did: BATCH_DID,
@@ -122,6 +124,7 @@ let allocateCalls = 0;
 // The templates API, stubbed: echoes a populated unsigned VC the way
 // credential-templates builds one.
 let templateCalls = 0;
+let lastPopulateBody;
 globalThis.fetch = async (url, { body, headers } = {}) => {
     if (String(url).endsWith("/allocate")) {
         if (headers?.["x-api-key"] !== "status-test-key") {
@@ -144,7 +147,8 @@ globalThis.fetch = async (url, { body, headers } = {}) => {
         };
     }
     templateCalls++;
-    const { issuer, fields } = JSON.parse(body);
+    const { issuer, fields, image, achievementId } = JSON.parse(body);
+    lastPopulateBody = { issuer, fields, image, achievementId };
     if (!String(url).includes("/templates/conference")) {
         return { ok: false, status: 404, text: async () => "no such template" };
     }
@@ -152,16 +156,27 @@ globalThis.fetch = async (url, { body, headers } = {}) => {
         ok: true,
         status: 200,
         json: async () => ({
-            "@context": ["https://www.w3.org/ns/credentials/v2"],
-            type: ["VerifiableCredential", "ConferenceAttendanceCredential"],
+            "@context": [
+                "https://www.w3.org/ns/credentials/v2",
+                "https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.2.json",
+            ],
+            type: ["VerifiableCredential", "OpenBadgeCredential"],
             name: `${fields.conferenceName} Attendance`,
             issuer: { id: issuer.url, type: ["Profile"], name: issuer.name },
+            validFrom: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
             credentialSubject: {
-                type: ["Person"],
+                type: ["AchievementSubject"],
                 name: fields.recipientName,
-                attendedEvent: { type: ["Event"], name: fields.conferenceName },
+                achievement: {
+                    id: achievementId,
+                    type: ["Achievement"],
+                    achievementType: "Badge",
+                    name: `${fields.conferenceName} Attendance`,
+                    description: `Attendance at ${fields.conferenceName}.`,
+                    criteria: { narrative: `The recipient attended ${fields.conferenceName}.` },
+                    ...(image && { image: { id: image, type: "Image" } }),
+                },
             },
-            validFrom: new Date().toISOString(),
         }),
     };
 };
@@ -260,7 +275,13 @@ check("credential id is urn:uuid:<credId>", credential?.id === `urn:uuid:${CRED_
 check("credentialSubject.id is the wallet DID", credential?.credentialSubject?.id === holderDid);
 check("subject fields come from the populated template",
     credential?.credentialSubject?.name === "Ada Lovelace" &&
-    credential?.credentialSubject?.attendedEvent?.name === "VC Summit 2026");
+    credential?.credentialSubject?.achievement?.name === "VC Summit 2026 Attendance");
+check("the bundle's image and achievement id reach the templates API",
+    lastPopulateBody?.image === "https://summit.example.org/badge.png" &&
+    lastPopulateBody?.achievementId === "urn:uuid:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+check("the credential carries the Open Badges contexts, no issuer-dependent vocab",
+    JSON.stringify(credential?.["@context"]).includes("purl.imsglobal.org/spec/ob/v3p0") &&
+    !JSON.stringify(credential?.["@context"]).includes("issuer-dependent"));
 check("proof is by the bundle's per-batch DID",
     credential?.proof?.verificationMethod?.startsWith(BATCH_DID));
 check("credential carries the allocated credentialStatus",
