@@ -2,11 +2,10 @@ import { useState } from 'react'
 import * as polyfill from 'credential-handler-polyfill'
 import QRCode from 'qrcode'
 
+// This stack's API (the ExchangeApi output), baked in at build time.
 const API = (import.meta.env.VITE_EXCHANGE_API ?? '').replace(/\/+$/, '')
-const BADGE_WORKFLOW = 'lcw-sandbox-badge'
-const BATCH_WORKFLOW = 'batch-credential'
+const WORKFLOW = 'lcw-sandbox-badge'
 const BADGE_IMAGE = 'https://digitalcredentials.github.io/badge-assets/lcw-exp.png'
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
@@ -49,18 +48,10 @@ const styles: Record<string, React.CSSProperties> = {
   }
 }
 
-// A badge claim link (from the badge notification email) carries the
-// recipient's name; without one, the page prompts for it first. A batch
-// collection link (from the batch-issuer notify email) instead carries a
-// credId and a ctx, which drive the batch-credential workflow.
+// A claim link (from the notification email) carries the recipient's name;
+// without one, the page prompts for it first.
 const urlParams = new URLSearchParams(window.location.search)
 const urlName = urlParams.get('name')?.trim() ?? ''
-const urlCredId = urlParams.get('credId')?.trim() ?? ''
-const urlCtx = urlParams.get('ctx')?.trim() ?? ''
-const batchClaim =
-  UUID_RE.test(urlCredId) && UUID_RE.test(urlCtx)
-    ? { credId: urlCredId, ctx: urlCtx }
-    : null
 
 // Prompt for the name the credential should be issued to. Continue claims in
 // this browser; alternatively, an email address turns it into a mailed claim
@@ -110,7 +101,7 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
     setError('')
     setSentTo('')
     try {
-      const res = await fetch(`${API}/workflows/${BADGE_WORKFLOW}/notifications`, {
+      const res = await fetch(`${API}/workflows/${WORKFLOW}/notifications`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), email: email.trim() })
@@ -129,11 +120,7 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
 
   return (
     <div style={styles.card}>
-      <img
-        style={styles.image}
-        src="https://digitalcredentials.github.io/badge-assets/lcw-exp.png"
-        alt="LCW Sandbox Badge"
-      />
+      <img style={styles.image} src={BADGE_IMAGE} alt="LCW Sandbox Badge" />
       <h1 style={{ fontSize: 22, margin: '12px 0 4px' }}>LCW Sandbox Badge</h1>
       <p style={{ fontSize: 14, color: '#4b5563', margin: 0 }}>
         Whose name should go on the credential?
@@ -188,38 +175,21 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
   )
 }
 
-// One claim card for both workflows: the badge (create body {name}) and a
-// batch credential (create body {credId, ctx}). The CHAPI and QR flows below
-// are identical for both — they use the exchange URL the server returns, and
-// for the batch workflow that URL already contains the ?ctx= parameter.
-function ClaimCard({
-  workflow,
-  requestBody,
-  title,
-  intro,
-  image,
-}: {
-  workflow: string
-  requestBody: Record<string, string>
-  title: string
-  intro: React.ReactNode
-  image?: string
-}) {
+// The claim card for a name: the CHAPI and QR flows both use the exchange
+// URL the server returns.
+function ClaimCard({ name }: { name: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
   const [mobile, setMobile] = useState<{ link: string; qr: string } | null>(null)
 
   async function createExchange() {
-    const res = await fetch(`${API}/workflows/${workflow}/exchanges`, {
+    const res = await fetch(`${API}/workflows/${WORKFLOW}/exchanges`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify({ name })
     })
     if (!res.ok) {
-      if (workflow === BATCH_WORKFLOW && (res.status === 400 || res.status === 404)) {
-        throw new Error('This collection link is not valid or has been revoked.')
-      }
       throw new Error(`The issuer could not start an exchange (${res.status}).`)
     }
     return res.json()
@@ -286,10 +256,12 @@ function ClaimCard({
 
   return (
     <div style={styles.card}>
-      {image && <img style={styles.image} src={image} alt={title} />}
-      <h1 style={{ fontSize: 22, margin: '12px 0 4px' }}>{title}</h1>
+      <img style={styles.image} src={BADGE_IMAGE} alt="LCW Sandbox Badge" />
+      <h1 style={{ fontSize: 22, margin: '12px 0 4px' }}>LCW Sandbox Badge</h1>
       <p style={{ fontSize: 14, color: '#4b5563', margin: 0 }}>
-        {intro}
+        A badge for <strong>{name}</strong> is ready. Claim it into your
+        Learner Credential Wallet: your wallet proves control of a DID, and
+        the credential is issued to it in your name.
       </p>
       <button style={styles.button} onClick={claim} disabled={busy}>
         {busy ? 'Working…' : 'Add to Web Wallet'}
@@ -318,7 +290,7 @@ function ClaimCard({
       {error && <p style={styles.error}>{error}</p>}
       <p style={styles.note}>
         The web wallet uses CHAPI for wallet selection (register it with your
-        browser first — in the LCW sandbox, use “Enable browser wallet”); the
+        browser first; in the LCW sandbox, use “Enable browser wallet”); the
         mobile option opens the{' '}
         <a href="https://lcw.app" style={{ color: '#4f46e5' }}>Learner Credential Wallet app</a>.
         Both issue over a Verifiable Credential API exchange.
@@ -338,43 +310,10 @@ export default function App() {
     setClaimName(name)
   }
 
-  // A batch collection link (credId + ctx) takes precedence: no name prompt,
-  // straight to collecting the staged credential.
-  if (batchClaim) {
-    return (
-      <div style={styles.page}>
-        <ClaimCard
-          workflow={BATCH_WORKFLOW}
-          requestBody={batchClaim}
-          title="Collect your credential"
-          intro={
-            <>
-              A credential has been issued to you and is ready to collect into
-              your Learner Credential Wallet: your wallet proves control of a
-              DID, and the credential is bound to it.
-            </>
-          }
-        />
-      </div>
-    )
-  }
-
   return (
     <div style={styles.page}>
       {claimName ? (
-        <ClaimCard
-          workflow={BADGE_WORKFLOW}
-          requestBody={{ name: claimName }}
-          title="LCW Sandbox Badge"
-          image={BADGE_IMAGE}
-          intro={
-            <>
-              A badge for <strong>{claimName}</strong> is ready. Claim it into
-              your Learner Credential Wallet: your wallet proves control of a
-              DID, and the credential is issued to it in your name.
-            </>
-          }
-        />
+        <ClaimCard name={claimName} />
       ) : (
         <NamePrompt onContinue={continueToClaim} />
       )}
