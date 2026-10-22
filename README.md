@@ -31,7 +31,11 @@ One workflow, `lcw-sandbox-badge`:
 | POST | `/workflows/lcw-sandbox-badge/notifications` | Send a claim email: `{"name", "email"}` → SES mails the address a link to the collection page with `?name=` attached |
 
 The wallet proves control of a DID by signing a DIDAuth presentation over the
-exchange's challenge and domain (Ed25519Signature2020). On success the badge
+exchange's challenge and domain (Ed25519Signature2020). The DIDAuthentication
+query states the holder DID methods the issuer verifies (`acceptedMethods`:
+`web` and `key`), so the wallet answers with its account's `did:web`
+projection (served by its identity domain and resolved here over HTTPS)
+rather than a fresh `did:key` per credential. On success the badge
 is issued with `credentialSubject.id` set to that DID, signed with the
 issuer's seed-derived `did:key`
 (`did:key:z6MkkCNaxehr7RoeDJQP39oQ1yFbmUg29ziXfLwoyeCo1QFf`), and returned

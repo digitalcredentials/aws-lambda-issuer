@@ -47,7 +47,14 @@ function parseBody(event) {
 function didAuthRequest({ challenge, domain }) {
   return {
     verifiablePresentationRequest: {
-      query: [{ type: "DIDAuthentication" }],
+      query: [
+        {
+          type: "DIDAuthentication",
+          // The holder DIDs this issuer verifies: a did:web (the wallet's
+          // account projection, resolved over HTTPS) or a did:key.
+          acceptedMethods: [{ method: "web" }, { method: "key" }],
+        },
+      ],
       challenge,
       domain,
     },
@@ -150,7 +157,14 @@ async function createExchange(event) {
     state: "pending",
     // What the collection page hands to the wallet via CHAPI
     verifiablePresentationRequest: {
-      query: [{ type: "DIDAuthentication" }],
+      query: [
+        {
+          type: "DIDAuthentication",
+          // The holder DIDs this issuer verifies: a did:web (the wallet's
+          // account projection, resolved over HTTPS) or a did:key.
+          acceptedMethods: [{ method: "web" }, { method: "key" }],
+        },
+      ],
       challenge,
       domain,
       interact: {
