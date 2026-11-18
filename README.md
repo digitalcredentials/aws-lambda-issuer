@@ -1,9 +1,11 @@
 # aws-lambda-issuer
 
-> [!WARNING]
-> This is a throw-away repository, built for testing the LCW sandbox's
-> issuance flow. It is not meant for long-term use: expect it to change
-> without notice, be reset, or disappear entirely.
+> [!IMPORTANT]
+> **Alpha.** This is part of the Learner Credential Wallet alpha, an early test
+> version. It is also a throw-away repository, built for testing the LCW
+> sandbox's issuance flow, and not meant for long-term use: it may change
+> without notice, be reset, or disappear entirely. We read issues, but may not
+> answer or fix them during the alpha.
 
 The LCW sandbox's **test issuer**, defined with
 [AWS SAM](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/what-is-sam.html):
@@ -108,3 +110,7 @@ signature verifies → the completed exchange replays its result.
 
 The lcw-front-end repo's `npm run test:claim` drives the same flow against
 the deployed API using the wallet's own signing stack.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
