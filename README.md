@@ -40,7 +40,7 @@ projection (served by its identity domain and resolved here over HTTPS)
 rather than a fresh `did:key` per credential. On success the badge
 is issued with `credentialSubject.id` set to that DID, signed with the
 issuer's seed-derived `did:key`
-(`did:key:z6MkkCNaxehr7RoeDJQP39oQ1yFbmUg29ziXfLwoyeCo1QFf`), and returned
+(`did:key:z6MkqTkYhk9RioTvoaZurbKNDjMqNhjZ81hMywWP5F7i418r`), and returned
 inside a presentation envelope, the exchange's final result. A completed
 exchange replays its result idempotently; exchanges expire after 15 minutes
 (DynamoDB TTL).
@@ -75,6 +75,9 @@ CloudFront rather than S3 website hosting.
   register. The DID is listed in the
   [DCC member registry](https://github.com/digitalcredentials/dcc-registry)
   under the issuer's name, so changing the seed means a new registry entry.
+  The deployed seed is also kept encrypted in AWS Systems Manager Parameter
+  Store (`/lcw/alpha-testing-badge/issuer-seed`), so the identity can be
+  moved to another stack.
 - **`IssuerName`** / **`IssuerUrl`**: the organization the badge names as its
   issuer and its website (defaults `Digital Credentials Commons`,
   `https://dccommons.org`). The emails name the same organization. The
