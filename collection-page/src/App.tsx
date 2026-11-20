@@ -6,6 +6,7 @@ import QRCode from 'qrcode'
 const API = (import.meta.env.VITE_EXCHANGE_API ?? '').replace(/\/+$/, '')
 const WORKFLOW = 'lcw-sandbox-badge'
 const BADGE_IMAGE = 'https://digitalcredentials.github.io/badge-assets/lcw-exp.png'
+const BADGE_NAME = 'LCW Alpha Testing Badge'
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
@@ -120,12 +121,12 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
 
   return (
     <div style={styles.card}>
-      <img style={styles.image} src={BADGE_IMAGE} alt="LCW Sandbox Badge" />
-      <h1 style={{ fontSize: 22, margin: '12px 0 4px' }}>LCW Sandbox Badge</h1>
+      <img style={styles.image} src={BADGE_IMAGE} alt={BADGE_NAME} />
+      <h1 style={{ fontSize: 22, margin: '12px 0 4px' }}>{BADGE_NAME}</h1>
       <p style={{ fontSize: 14, color: '#4b5563', margin: 0 }}>
-        Whose name should go on the credential?
+        Whose name should go on the badge?
       </p>
-      <label style={styles.label} htmlFor="recipient-name">Name on the credential</label>
+      <label style={styles.label} htmlFor="recipient-name">Name on the badge</label>
       <input
         id="recipient-name"
         style={styles.input}
@@ -159,17 +160,17 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
         onClick={sendEmail}
         disabled={busy}
       >
-        {busy ? 'Sending…' : 'Send claim email'}
+        {busy ? 'Sending…' : 'Send the link'}
       </button>
       {sentTo && (
         <p style={styles.success}>
-          Sent! {sentTo} has been emailed a link to claim the badge.
+          Sent. Check {sentTo} for a link to get the badge.
         </p>
       )}
       {error && <p style={styles.error}>{error}</p>}
       <p style={styles.note}>
-        Either way, the credential is issued to that name and bound to the
-        claimer&#39;s wallet DID.
+        Either way, the badge carries the name you enter and goes into the
+        wallet you add it to.
       </p>
     </div>
   )
@@ -256,12 +257,11 @@ function ClaimCard({ name }: { name: string }) {
 
   return (
     <div style={styles.card}>
-      <img style={styles.image} src={BADGE_IMAGE} alt="LCW Sandbox Badge" />
-      <h1 style={{ fontSize: 22, margin: '12px 0 4px' }}>LCW Sandbox Badge</h1>
+      <img style={styles.image} src={BADGE_IMAGE} alt={BADGE_NAME} />
+      <h1 style={{ fontSize: 22, margin: '12px 0 4px' }}>{BADGE_NAME}</h1>
       <p style={{ fontSize: 14, color: '#4b5563', margin: 0 }}>
-        A badge for <strong>{name}</strong> is ready. Claim it into your
-        Learner Credential Wallet: your wallet proves control of a DID, and
-        the credential is issued to it in your name.
+        A badge for <strong>{name}</strong> is ready. Add it to your Learner
+        Credential Wallet.
       </p>
       <button style={styles.button} onClick={claim} disabled={busy}>
         {busy ? 'Working…' : 'Add to Web Wallet'}
@@ -276,7 +276,7 @@ function ClaimCard({ name }: { name: string }) {
             Scan with your phone&#39;s camera, or if you&#39;re reading this on
             your phone,{' '}
             <a href={mobile.link} style={{ color: '#4f46e5' }}>
-              open it in the LCW app
+              open it in the Learner Credential Wallet app
             </a>
             . The link is valid for 15 minutes.
           </p>
@@ -284,16 +284,15 @@ function ClaimCard({ name }: { name: string }) {
       )}
       {done && (
         <p style={styles.success}>
-          Credential claimed! Check your wallet.
+          Badge added. Check your wallet.
         </p>
       )}
       {error && <p style={styles.error}>{error}</p>}
       <p style={styles.note}>
-        The web wallet uses CHAPI for wallet selection (register it with your
-        browser first; in the LCW sandbox, use “Enable browser wallet”); the
-        mobile option opens the{' '}
+        Add to Web Wallet needs your wallet enabled in this browser. If you
+        haven&#39;t done that yet, sign in to your wallet and choose Settings →
+        Enable browser wallet. Add to Mobile Wallet opens the{' '}
         <a href="https://lcw.app" style={{ color: '#4f46e5' }}>Learner Credential Wallet app</a>.
-        Both issue over a Verifiable Credential API exchange.
       </p>
     </div>
   )

@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
   VCALM test issuer for the LCW sandbox: an exchange endpoint that issues
-  one kind of credential, the LCW Sandbox Badge (DIDAuth-bound to the
+  one kind of credential, the LCW Alpha Testing Badge (DIDAuth-bound to the
   wallet's DID), plus the S3+CloudFront-hosted claim page wallets claim it
   from. The batch issuer is a separate stack (batch-issuer-backend).
 
@@ -70,7 +70,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: lcw-sandbox-issuer
-      Description: VCALM workflow exchanges that issue the LCW Sandbox Badge
+      Description: VCALM workflow exchanges that issue the LCW Alpha Testing Badge
       CodeUri: src/issuer
       Handler: app.lambdaHandler
       Runtime: nodejs24.x

@@ -106,6 +106,17 @@ check("valid DIDAuth -> 200 with issued credential", res.statusCode === 200 && !
 check("credentialSubject.id is the wallet DID", credential?.credentialSubject?.id === holderDid);
 check("credentialSubject.name is the notified name", credential?.credentialSubject?.name === HOLDER_NAME);
 check("issuer is the seed-derived DID", credential?.issuer?.id === issuerDid);
+// The badge's wording (issue #18), and the words it must not carry. The
+// issuer's own name is not checked: it changes with the issuer identity (#22)
+const achievement = credential?.credentialSubject?.achievement;
+const FORBIDDEN = /sandbox|\bDID\b|CHAPI|VC API|DIDAuth/i;
+check("the badge is named LCW Alpha Testing Badge", credential?.name === "LCW Alpha Testing Badge" &&
+    achievement?.name === "LCW Alpha Testing Badge");
+check("the badge carries the agreed description and criteria",
+    achievement?.description === "Issued to people who tested the Learner Credential Wallet alpha. It doesn't certify any skill, course or achievement." &&
+    achievement?.criteria?.narrative === "Claimed into a Learner Credential Wallet during the alpha.");
+check("the badge's name, description, criteria and achievement id avoid the excluded words",
+    !FORBIDDEN.test([credential?.name, achievement?.name, achievement?.description, achievement?.criteria?.narrative, achievement?.id].join(" ")));
 
 // 7. the signature verifies with the same stack veri-good uses
 const verification = await vc.verifyCredential({
@@ -154,6 +165,24 @@ check("email goes to the given address from NOTIFY_FROM_EMAIL",
 check("email links to the collection page with the encoded name",
     sent?.Content?.Simple?.Body?.Text?.Data?.includes(
         "https://issuer.example.com/?name=Grace%20Hopper") ?? false);
+
+const emailText = sent?.Content?.Simple?.Body?.Text?.Data ?? "";
+const emailHtmlBody = sent?.Content?.Simple?.Body?.Html?.Data ?? "";
+check("the email's subject is the agreed one",
+    sent?.Content?.Simple?.Subject?.Data === "Your LCW Alpha Testing Badge is ready");
+check("the plain-text email carries the agreed wording", emailText ===
+    "Hi Grace Hopper, your LCW Alpha Testing Badge is ready. Open the link and choose Add to Web Wallet to add it to your Learner Credential Wallet.\n\n" +
+    "Get my badge: https://issuer.example.com/?name=Grace%20Hopper\n\n" +
+    "If Add to Web Wallet doesn't show your wallet, sign in to your wallet, choose Settings → Enable browser wallet, and open this link again.\n\n" +
+    "This badge is for testing the alpha. It doesn't certify any skill or achievement.\n\n" +
+    "Digital Credentials Commons · Learner Credential Wallet");
+check("the HTML email has the Get my badge button and the same sentences",
+    emailHtmlBody.includes(">Get my badge</a>") &&
+    emailHtmlBody.includes("Hi Grace Hopper, your LCW Alpha Testing Badge is ready.") &&
+    emailHtmlBody.includes("This badge is for testing the alpha.") &&
+    emailHtmlBody.includes("Digital Credentials Commons &middot; Learner Credential Wallet"));
+check("the email avoids the excluded words",
+    !FORBIDDEN.test(emailText) && !FORBIDDEN.test(emailHtmlBody.replace(/<[^>]+>/g, " ")));
 
 // 12. notification validation
 res = await lambdaHandler(event({ path: notifyPath, body: JSON.stringify({ name: "", email: "grace@example.com" }) }));

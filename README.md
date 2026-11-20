@@ -9,7 +9,7 @@
 
 The LCW sandbox's **test issuer**, defined with
 [AWS SAM](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/what-is-sam.html):
-one Lambda that issues the on-demand LCW Sandbox Badge over a
+one Lambda that issues the on-demand LCW Alpha Testing Badge over a
 [VCALM workflow exchange](https://www.w3.org/TR/vcalm-1.0/#workflows-and-exchanges),
 and the S3+CloudFront-hosted React **claim page** wallets claim it from
 ([https://issuer.lcw-sandbox.org](https://issuer.lcw-sandbox.org)). The
