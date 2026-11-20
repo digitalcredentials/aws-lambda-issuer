@@ -14,6 +14,17 @@ Parameters:
       64-char hex seed for the issuer's Ed25519 signing key (its did:key is
       derived from this). Keep it stable: the derived DID is what verifiers
       register.
+  IssuerName:
+    Type: String
+    Description: >
+      The organization the badge names as its issuer, and the emails name as
+      their sender. The DCC registry entry for the issuer's DID carries the
+      same name: change the two together.
+    Default: Digital Credentials Commons
+  IssuerUrl:
+    Type: String
+    Description: The issuer organization's website, carried in the badge.
+    Default: https://dccommons.org
   DomainName:
     Type: String
     Description: Domain for the collection page.
@@ -80,6 +91,9 @@ Resources:
       Environment:
         Variables:
           ISSUER_SEED: !Ref IssuerSeed
+          ISSUER_NAME: !Ref IssuerName
+          ISSUER_URL: !Ref IssuerUrl
+          ORG_NAME: !Ref IssuerName
           TABLE_NAME: !Ref ExchangesTable
           COLLECTION_PAGE_URL: !Sub https://${DomainName}
           NOTIFY_FROM_EMAIL: !Ref NotifyFromEmail

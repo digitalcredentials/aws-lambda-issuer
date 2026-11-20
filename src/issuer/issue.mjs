@@ -7,6 +7,11 @@ import { securityLoader } from "@digitalcredentials/security-document-loader";
 // are fetched over the network and cached for the life of the container.
 export const documentLoader = securityLoader({ fetchRemoteContexts: true }).build();
 
+// The organization the badge names as its issuer: a DCC identity that
+// outlives the alpha, listed under this name in the DCC member registry.
+const ISSUER_NAME = process.env.ISSUER_NAME ?? "Digital Credentials Commons";
+const ISSUER_URL = process.env.ISSUER_URL ?? "https://dccommons.org";
+
 let cachedSuite;
 
 // The issuer's signing suite, derived once per container from ISSUER_SEED.
@@ -44,8 +49,8 @@ export function badgeCredential({ issuerDid, holderDid, holderName }) {
     issuer: {
       id: issuerDid,
       type: ["Profile"],
-      name: "LCW Sandbox Issuer",
-      url: process.env.COLLECTION_PAGE_URL ?? "https://issuer.lcw-sandbox.org",
+      name: ISSUER_NAME,
+      url: ISSUER_URL,
     },
     validFrom: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     credentialSubject: {

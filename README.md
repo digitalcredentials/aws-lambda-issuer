@@ -72,7 +72,13 @@ CloudFront rather than S3 website hosting.
 
 - **`IssuerSeed`** (NoEcho, required): 64-char hex seed for the issuer's
   Ed25519 key. Keep it stable: the derived `did:key` is what verifiers
-  register (the LCW sandbox wallet lists it as *LCW Sandbox Issuer*).
+  register. The DID is listed in the
+  [DCC member registry](https://github.com/digitalcredentials/dcc-registry)
+  under the issuer's name, so changing the seed means a new registry entry.
+- **`IssuerName`** / **`IssuerUrl`**: the organization the badge names as its
+  issuer and its website (defaults `Digital Credentials Commons`,
+  `https://dccommons.org`). The emails name the same organization. The
+  registry entry carries the same name: change the two together.
 - **`DomainName`** / **`CertificateArn`** / **`HostedZoneId`**: the claim
   page's domain (default `issuer.lcw-sandbox.org`), its ACM certificate, and
   the Route 53 zone the alias records go in.
