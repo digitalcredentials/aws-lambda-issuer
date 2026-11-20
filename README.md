@@ -68,8 +68,7 @@ exchange replays its result idempotently; exchanges expire after 15 minutes
 
 `collection-page/` is a small React app. Opened plain
 (`https://issuer.lcw-sandbox.org`), it prompts for the name to put on the
-badge: **Continue to claim** proceeds in this browser (writing `?name=` into
-the URL), or an email address turns it into a mailed claim link, which the
+badge and for the claim code: **Continue to claim** proceeds in this browser, or an email address turns it into a mailed claim link, which the
 notifications endpoint emails back to this page with the name as a `?name=`
 query parameter. Opened with a name, it shows the badge card for that name
 with two claim options, each creating an exchange (passing the name along, so
