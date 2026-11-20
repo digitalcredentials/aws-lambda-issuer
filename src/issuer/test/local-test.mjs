@@ -106,8 +106,10 @@ check("valid DIDAuth -> 200 with issued credential", res.statusCode === 200 && !
 check("credentialSubject.id is the wallet DID", credential?.credentialSubject?.id === holderDid);
 check("credentialSubject.name is the notified name", credential?.credentialSubject?.name === HOLDER_NAME);
 check("issuer is the seed-derived DID", credential?.issuer?.id === issuerDid);
-// The badge's wording (issue #18), and the words it must not carry. The
-// issuer's own name is not checked: it changes with the issuer identity (#22)
+// The issuer the badge names (issue #22)
+check("the badge names its issuer Digital Credentials Commons",
+    credential?.issuer?.name === "Digital Credentials Commons" && credential?.issuer?.url === "https://dccommons.org");
+// The badge's wording (issue #18), and the words it must not carry
 const achievement = credential?.credentialSubject?.achievement;
 const FORBIDDEN = /sandbox|\bDID\b|CHAPI|VC API|DIDAuth/i;
 check("the badge is named LCW Alpha Testing Badge", credential?.name === "LCW Alpha Testing Badge" &&
@@ -115,8 +117,8 @@ check("the badge is named LCW Alpha Testing Badge", credential?.name === "LCW Al
 check("the badge carries the agreed description and criteria",
     achievement?.description === "Issued to people who tested the Learner Credential Wallet alpha. It doesn't certify any skill, course or achievement." &&
     achievement?.criteria?.narrative === "Claimed into a Learner Credential Wallet during the alpha.");
-check("the badge's name, description, criteria and achievement id avoid the excluded words",
-    !FORBIDDEN.test([credential?.name, achievement?.name, achievement?.description, achievement?.criteria?.narrative, achievement?.id].join(" ")));
+check("the badge's name, issuer, description, criteria and achievement id avoid the excluded words",
+    !FORBIDDEN.test([credential?.name, credential?.issuer?.name, credential?.issuer?.url, achievement?.name, achievement?.description, achievement?.criteria?.narrative, achievement?.id].join(" ")));
 
 // 7. the signature verifies with the same stack veri-good uses
 const verification = await vc.verifyCredential({
