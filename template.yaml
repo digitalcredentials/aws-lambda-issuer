@@ -14,6 +14,19 @@ Parameters:
       64-char hex seed for the issuer's Ed25519 signing key (its did:key is
       derived from this). Keep it stable: the derived DID is what verifiers
       register.
+  ClaimCode:
+    Type: String
+    NoEcho: true
+    Description: >
+      The code the claim page asks for before it emails a link or issues a
+      badge. One code for everyone who is given it; wallet accounts need
+      none (they present a grant from the wallet's back end).
+  WalletApiBase:
+    Type: String
+    Description: >
+      The wallet's back end (lcw-back-end), which the issuer asks whether a
+      wallet account's grant is good and to mark it used. No trailing slash.
+    Default: https://api.lcw-sandbox.org
   IssuerName:
     Type: String
     Description: >
@@ -91,6 +104,8 @@ Resources:
       Environment:
         Variables:
           ISSUER_SEED: !Ref IssuerSeed
+          CLAIM_CODE: !Ref ClaimCode
+          WALLET_API_BASE: !Ref WalletApiBase
           ISSUER_NAME: !Ref IssuerName
           ISSUER_URL: !Ref IssuerUrl
           ORG_NAME: !Ref IssuerName

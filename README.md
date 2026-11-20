@@ -32,6 +32,25 @@ One workflow, `lcw-sandbox-badge`:
 | GET | `/workflows/lcw-sandbox-badge/exchanges/{exchangeId}` | The exchange's state |
 | POST | `/workflows/lcw-sandbox-badge/notifications` | Send a claim email: `{"name", "email"}` → SES mails the address a link to the collection page with `?name=` attached |
 
+### Who may have the badge
+
+The badge goes to wallet accounts, once each, and to people given the claim
+code. A request has to carry one of:
+
+- **`code`**: the claim code (the `ClaimCode` parameter), which the claim
+  page's form asks for. It can be used any number of times.
+- **`grant`**: a wallet account's grant. The wallet gets it from its back
+  end (`POST /badge-grant` on lcw-back-end, signed as the account) and sends
+  it with the notification; the issuer asks the back end whether it is good
+  (`POST /badge-grant/redeem`), and to mark it used when the badge is
+  issued, so an account gets one badge.
+- **`token`**: what an emailed link carries. A notification mints one when
+  its code or grant is accepted; it is good for one badge and for 7 days.
+
+A notification takes a `code` or a `grant`; creating an exchange takes a
+`token` or a `code`. Anything else is answered `403` with the reason in
+`error`.
+
 The wallet proves control of a DID by signing a DIDAuth presentation over the
 exchange's challenge and domain (Ed25519Signature2020). The DIDAuthentication
 query states the holder DID methods the issuer verifies (`acceptedMethods`:
@@ -78,6 +97,9 @@ CloudFront rather than S3 website hosting.
   The deployed seed is also kept encrypted in AWS Systems Manager Parameter
   Store (`/lcw/alpha-testing-badge/issuer-seed`), so the identity can be
   moved to another stack.
+- **`ClaimCode`** (NoEcho, required): the code the claim page asks for.
+- **`WalletApiBase`**: the wallet's back end, which checks and uses wallet
+  accounts' grants (default `https://api.lcw-sandbox.org`).
 - **`IssuerName`** / **`IssuerUrl`**: the organization the badge names as its
   issuer and its website (defaults `Digital Credentials Commons`,
   `https://dccommons.org`). The emails name the same organization. The

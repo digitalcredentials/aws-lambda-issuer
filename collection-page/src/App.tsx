@@ -49,16 +49,34 @@ const styles: Record<string, React.CSSProperties> = {
   }
 }
 
-// A claim link (from the notification email) carries the recipient's name;
-// without one, the page prompts for it first.
+// A claim link (from the notification email) carries the recipient's name
+// and a token that is good for one badge; without a token, the page asks
+// for the name and the code first.
 const urlParams = new URLSearchParams(window.location.search)
 const urlName = urlParams.get('name')?.trim() ?? ''
+const urlToken = urlParams.get('token')?.trim() ?? ''
+
+// What lets a badge be issued: the emailed link's token, or the code typed
+// into the form
+type Access = { token: string } | { code: string }
+interface Claim {
+  name: string
+  access: Access
+}
+
+// The issuer's own sentence for a refusal, when it gave one
+async function refusalOf(res: Response, fallback: string): Promise<string> {
+  const body = await res.json().catch(() => ({}))
+  return typeof body.error === 'string' && body.error ? body.error : fallback
+}
 
 // Prompt for the name the credential should be issued to. Continue claims in
 // this browser; alternatively, an email address turns it into a mailed claim
 // link for someone else.
-function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
-  const [name, setName] = useState('')
+function NamePrompt({ onContinue }: { onContinue: (claim: Claim) => void }) {
+  const [name, setName] = useState(urlName)
+  const [code, setCode] = useState('')
+  const [codeError, setCodeError] = useState('')
   const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -78,14 +96,25 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
     return true
   }
 
+  function requireCode(): boolean {
+    if (!code.trim()) {
+      setCodeError('Please enter your code.')
+      return false
+    }
+    setCodeError('')
+    return true
+  }
+
+  // The code is checked by the issuer when the badge is asked for
   function continueToClaim() {
-    if (requireName()) {
-      onContinue(name.trim())
+    const nameOk = requireName()
+    if (requireCode() && nameOk) {
+      onContinue({ name: name.trim(), access: { code: code.trim() } })
     }
   }
 
   async function sendEmail() {
-    const nameOk = requireName()
+    const nameOk = requireName() && requireCode()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       setEmailError('Please enter a valid email address to which to send the claim link.')
       if (nameOk) {
@@ -105,11 +134,10 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
       const res = await fetch(`${API}/workflows/${WORKFLOW}/notifications`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), email: email.trim() })
+        body: JSON.stringify({ name: name.trim(), email: email.trim(), code: code.trim() })
       })
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.error ?? `The notification could not be sent (${res.status}).`)
+        throw new Error(await refusalOf(res, `The link could not be sent (${res.status}).`))
       }
       setSentTo(email.trim())
     } catch (err) {
@@ -136,6 +164,17 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
         maxLength={100}
       />
       {nameError && <p role="alert" style={styles.error}>{nameError}</p>}
+      <label style={styles.label} htmlFor="claim-code">Code</label>
+      <input
+        id="claim-code"
+        style={styles.input}
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        placeholder="Your code"
+        autoComplete="off"
+        maxLength={100}
+      />
+      {codeError && <p role="alert" style={styles.error}>{codeError}</p>}
       <button
         style={styles.button}
         onClick={continueToClaim}
@@ -178,7 +217,8 @@ function NamePrompt({ onContinue }: { onContinue: (name: string) => void }) {
 
 // The claim card for a name: the CHAPI and QR flows both use the exchange
 // URL the server returns.
-function ClaimCard({ name }: { name: string }) {
+function ClaimCard({ request, onRefused }: { request: Claim; onRefused: () => void }) {
+  const { name, access } = request
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
@@ -188,10 +228,10 @@ function ClaimCard({ name }: { name: string }) {
     const res = await fetch(`${API}/workflows/${WORKFLOW}/exchanges`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
+      body: JSON.stringify({ name, ...access })
     })
     if (!res.ok) {
-      throw new Error(`The issuer could not start an exchange (${res.status}).`)
+      throw new Error(await refusalOf(res, `The issuer could not start an exchange (${res.status}).`))
     }
     return res.json()
   }
@@ -288,6 +328,11 @@ function ClaimCard({ name }: { name: string }) {
         </p>
       )}
       {error && <p style={styles.error}>{error}</p>}
+      {error && 'code' in access && (
+        <button style={styles.secondaryButton} onClick={onRefused}>
+          Enter the code again
+        </button>
+      )}
       <p style={styles.note}>
         Add to Web Wallet needs your wallet enabled in this browser. If you
         haven&#39;t done that yet, sign in to your wallet and choose Settings →
@@ -299,22 +344,16 @@ function ClaimCard({ name }: { name: string }) {
 }
 
 export default function App() {
-  const [claimName, setClaimName] = useState(urlName)
-
-  function continueToClaim(name: string) {
-    // Keep the name in the URL so a refresh stays on the claim card
-    const url = new URL(window.location.href)
-    url.searchParams.set('name', name)
-    window.history.replaceState(null, '', url)
-    setClaimName(name)
-  }
+  // An emailed link opens the claim card at once; anything else starts at
+  // the form, since a badge needs the link's token or the code
+  const [claim, setClaim] = useState<Claim | null>(urlName && urlToken ? { name: urlName, access: { token: urlToken } } : null)
 
   return (
     <div style={styles.page}>
-      {claimName ? (
-        <ClaimCard name={claimName} />
+      {claim ? (
+        <ClaimCard request={claim} onRefused={() => setClaim(null)} />
       ) : (
-        <NamePrompt onContinue={continueToClaim} />
+        <NamePrompt onContinue={setClaim} />
       )}
     </div>
   )

@@ -14,6 +14,28 @@ process.env.ISSUER_SEED = "5b".repeat(32);
 process.env.TABLE_NAME = "exchanges-test";
 process.env.COLLECTION_PAGE_URL = "https://issuer.example.com";
 process.env.NOTIFY_FROM_EMAIL = "issuer@example.com";
+process.env.CLAIM_CODE = "TEST-CODE";
+process.env.WALLET_API_BASE = "https://api.example.com";
+const CODE = "TEST-CODE";
+
+// The wallet's back end, as the issuer reaches it: one account's grant,
+// good until it is used. Every other request (JSON-LD contexts) goes out.
+const GRANT = "Z3JhY2VAZXhhbXBsZS5jb20.grant-secret";
+let grantCollected = false;
+const grantCalls = [];
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+    if (!String(url).startsWith("https://api.example.com/")) {
+        return realFetch(url, init);
+    }
+    const { grant, consume } = JSON.parse(init.body);
+    grantCalls.push({ grant, consume });
+    const answer = (status, body) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+    if (grant !== GRANT) return answer(404, { valid: false });
+    if (grantCollected) return answer(409, { valid: false, collected: true });
+    if (consume) grantCollected = true;
+    return answer(200, { valid: true });
+};
 
 const { lambdaHandler } = await import("../app.mjs");
 const { documentLoader, issuerSuite } = await import("../issue.mjs");
@@ -27,6 +49,14 @@ ddb.on(PutItemCommand).callsFake((input) => {
 ddb.on(GetItemCommand).callsFake((input) => ({ Item: store.get(input.Key.exchangeId.S) }));
 ddb.on(UpdateItemCommand).callsFake((input) => {
     const item = store.get(input.Key.exchangeId.S);
+    if (input.UpdateExpression.includes("usedAt")) {
+        // A link's token, used once
+        if (!item || item.usedAt) {
+            throw Object.assign(new Error("condition"), { name: "ConditionalCheckFailedException" });
+        }
+        item.usedAt = input.ExpressionAttributeValues[":now"];
+        return {};
+    }
     item.state = input.ExpressionAttributeValues[":complete"];
     item.result = input.ExpressionAttributeValues[":result"];
     return {};
@@ -60,7 +90,7 @@ check("unknown workflow -> 404", res.statusCode === 404);
 
 // 2. create an exchange, carrying the recipient name from the claim link
 const HOLDER_NAME = "Ada Lovelace";
-res = await lambdaHandler(event({ body: JSON.stringify({ name: HOLDER_NAME }) }));
+res = await lambdaHandler(event({ body: JSON.stringify({ name: HOLDER_NAME, code: CODE }) }));
 const created = JSON.parse(res.body);
 check("create exchange -> 201 with challenge + interact service", res.statusCode === 201 &&
     !!created.verifiablePresentationRequest.challenge &&
@@ -139,7 +169,7 @@ res = await lambdaHandler(event({ exchangeId: "nope" }));
 check("unknown exchange -> 404", res.statusCode === 404);
 
 // 10. an exchange created without a name issues a nameless subject
-res = await lambdaHandler(event());
+res = await lambdaHandler(event({ body: JSON.stringify({ code: CODE }) }));
 const unnamed = JSON.parse(res.body);
 res = await lambdaHandler(event({ exchangeId: unnamed.exchangeId, body: JSON.stringify({
     verifiablePresentation: await vc.signPresentation({
@@ -157,7 +187,7 @@ check("nameless exchange -> subject has no name", res.statusCode === 200 &&
 // 11. the notification endpoint sends the claim email
 const notifyPath = "/workflows/lcw-sandbox-badge/notifications";
 res = await lambdaHandler(event({ path: notifyPath, body: JSON.stringify({
-    name: "Grace Hopper", email: "grace@example.com",
+    name: "Grace Hopper", email: "grace@example.com", code: CODE,
 }) }));
 const sent = sentEmails[0];
 check("notify -> 200 and SES send", res.statusCode === 200 && sentEmails.length === 1);
@@ -169,12 +199,14 @@ check("email links to the collection page with the encoded name",
         "https://issuer.example.com/?name=Grace%20Hopper") ?? false);
 
 const emailText = sent?.Content?.Simple?.Body?.Text?.Data ?? "";
+const linkToken = emailText.match(/[?&]token=([A-Za-z0-9_-]+)/)?.[1];
+check("the emailed link carries a token", Boolean(linkToken) && store.has(`token#${linkToken}`));
 const emailHtmlBody = sent?.Content?.Simple?.Body?.Html?.Data ?? "";
 check("the email's subject is the agreed one",
     sent?.Content?.Simple?.Subject?.Data === "Your LCW Alpha Testing Badge is ready");
 check("the plain-text email carries the agreed wording", emailText ===
     "Hi Grace Hopper, your LCW Alpha Testing Badge is ready. Open the link and choose Add to Web Wallet to add it to your Learner Credential Wallet.\n\n" +
-    "Get my badge: https://issuer.example.com/?name=Grace%20Hopper\n\n" +
+    `Get my badge: https://issuer.example.com/?name=Grace%20Hopper&token=${linkToken}\n\n` +
     "If Add to Web Wallet doesn't show your wallet, sign in to your wallet, choose Settings → Enable browser wallet, and open this link again.\n\n" +
     "This badge is for testing the alpha. It doesn't certify any skill or achievement.\n\n" +
     "Digital Credentials Commons · Learner Credential Wallet");
@@ -187,15 +219,15 @@ check("the email avoids the excluded words",
     !FORBIDDEN.test(emailText) && !FORBIDDEN.test(emailHtmlBody.replace(/<[^>]+>/g, " ")));
 
 // 12. notification validation
-res = await lambdaHandler(event({ path: notifyPath, body: JSON.stringify({ name: "", email: "grace@example.com" }) }));
+res = await lambdaHandler(event({ path: notifyPath, body: JSON.stringify({ name: "", email: "grace@example.com", code: CODE }) }));
 check("notify without a name -> 400", res.statusCode === 400);
-res = await lambdaHandler(event({ path: notifyPath, body: JSON.stringify({ name: "Grace", email: "not-an-email" }) }));
+res = await lambdaHandler(event({ path: notifyPath, body: JSON.stringify({ name: "Grace", email: "not-an-email", code: CODE }) }));
 check("notify with a bad email -> 400", res.statusCode === 400);
 check("invalid notifications sent nothing", sentEmails.length === 1);
 
 // 13. the LCW mobile wallet's shape: a bare VP signed over the challenge only
 // (no domain), answered with the bare presentation holding the credential
-res = await lambdaHandler(event({ body: JSON.stringify({ name: HOLDER_NAME }) }));
+res = await lambdaHandler(event({ body: JSON.stringify({ name: HOLDER_NAME, code: CODE }) }));
 const mobileExchange = JSON.parse(res.body);
 const mobileVp = await vc.signPresentation({
     presentation: vc.createPresentation({ holder: holderDid }),
@@ -223,10 +255,73 @@ const badMobileVp = await vc.signPresentation({
     challenge: "not-the-challenge",
     documentLoader,
 });
-res = await lambdaHandler(event({ body: JSON.stringify({}) }));
+res = await lambdaHandler(event({ body: JSON.stringify({ code: CODE }) }));
 const mobileExchange2 = JSON.parse(res.body);
 res = await lambdaHandler(event({ exchangeId: mobileExchange2.exchangeId, body: JSON.stringify(badMobileVp) }));
 check("bare VP with the wrong challenge -> 400", res.statusCode === 400);
+
+// 15. who may have the badge (issue 27): a code, a wallet account's grant,
+// or the token of an emailed link
+const post = (path, body) => lambdaHandler(event({ ...(path && { path }), body: JSON.stringify(body) }));
+// Plays the wallet through an exchange made with `body`; resolves the answer to the signed presentation
+async function claimWith(body) {
+    const made = await post(undefined, body);
+    if (made.statusCode !== 201) return made;
+    const exchange = JSON.parse(made.body);
+    const vp = await vc.signPresentation({
+        presentation: vc.createPresentation({ holder: holderDid }),
+        suite: new Ed25519Signature2020({ key: holderKey }),
+        challenge: exchange.verifiablePresentationRequest.challenge,
+        domain: exchange.verifiablePresentationRequest.domain,
+        documentLoader,
+    });
+    return lambdaHandler(event({ exchangeId: exchange.exchangeId, body: JSON.stringify({ verifiablePresentation: vp }) }));
+}
+const errorOf = (r) => JSON.parse(r.body).error;
+const emailsBefore = sentEmails.length;
+
+res = await post(undefined, { name: "Nobody" });
+check("an exchange with no code and no token -> 403", res.statusCode === 403 && errorOf(res) === "A code is required.");
+res = await post(undefined, { name: "Nobody", code: "WRONG" });
+check("an exchange with a wrong code -> 403", res.statusCode === 403 && errorOf(res) === "That code isn't valid.");
+res = await post(undefined, { token: "x".repeat(32) });
+check("an exchange with an unknown token -> 403", res.statusCode === 403);
+res = await post(notifyPath, { name: "Nobody", email: "nobody@example.com" });
+check("a notification with no code and no grant -> 403, nothing sent", res.statusCode === 403 && sentEmails.length === emailsBefore);
+res = await post(notifyPath, { name: "Nobody", email: "nobody@example.com", code: "WRONG" });
+check("a notification with a wrong code -> 403, nothing sent", res.statusCode === 403 && sentEmails.length === emailsBefore);
+res = await post(notifyPath, { name: "Nobody", email: "nobody@example.com", grant: "not-a-grant" });
+check("a notification with a grant the wallet's back end does not know -> 403, nothing sent", res.statusCode === 403 && sentEmails.length === emailsBefore);
+
+// The link emailed for a code: one badge
+res = await claimWith({ token: linkToken });
+const linked = JSON.parse(res.body).verifiablePresentation?.verifiableCredential?.[0];
+check("the emailed link's token gets the badge, in the name the link was made for", res.statusCode === 200 && linked?.credentialSubject?.name === "Grace Hopper");
+res = await post(undefined, { token: linkToken });
+check("the same link a second time -> 403", res.statusCode === 403 && errorOf(res) === "This link has already been used.");
+
+// A wallet account: the grant is checked for the email and used when the badge is issued
+res = await post(notifyPath, { name: "Ada Lovelace", email: "ada@example.com", grant: GRANT });
+const walletToken = sentEmails.at(-1)?.Content?.Simple?.Body?.Text?.Data?.match(/[?&]token=([A-Za-z0-9_-]+)/)?.[1];
+check("a wallet account's grant sends the email, and is not used yet", res.statusCode === 200 && Boolean(walletToken) && grantCollected === false && grantCalls.at(-1)?.consume === false);
+res = await post(notifyPath, { name: "Ada Lovelace", email: "ada@example.com", grant: GRANT });
+const secondToken = sentEmails.at(-1)?.Content?.Simple?.Body?.Text?.Data?.match(/[?&]token=([A-Za-z0-9_-]+)/)?.[1];
+check("the account can ask for the email again before collecting", res.statusCode === 200 && secondToken !== walletToken);
+// Two exchanges opened from the two links before either is finished
+const openFirst = JSON.parse((await post(undefined, { token: walletToken })).body);
+res = await claimWith({ token: secondToken });
+check("the wallet account collects its badge, and the grant is used", res.statusCode === 200 && grantCollected === true && grantCalls.at(-1)?.consume === true);
+const lateVp = await vc.signPresentation({
+    presentation: vc.createPresentation({ holder: holderDid }),
+    suite: new Ed25519Signature2020({ key: holderKey }),
+    challenge: openFirst.verifiablePresentationRequest.challenge,
+    domain: openFirst.verifiablePresentationRequest.domain,
+    documentLoader,
+});
+res = await lambdaHandler(event({ exchangeId: openFirst.exchangeId, body: JSON.stringify({ verifiablePresentation: lateVp }) }));
+check("the account's other link gets no second badge -> 403", res.statusCode === 403 && errorOf(res) === "This wallet account has already collected its badge." && !res.body.includes("verifiableCredential"));
+res = await post(notifyPath, { name: "Ada Lovelace", email: "ada@example.com", grant: GRANT });
+check("an account that has collected cannot ask for another email -> 403", res.statusCode === 403 && errorOf(res) === "This wallet account has already collected its badge.");
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
 process.exit(failures ? 1 : 0);
