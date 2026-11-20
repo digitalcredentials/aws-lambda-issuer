@@ -6,7 +6,7 @@ import {
 } from "@aws-sdk/client-dynamodb";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { verifyDidAuth, issueBadge } from "./issue.mjs";
-import { emailHtml, escapeHtml } from "./email.mjs";
+import { ORG_NAME, emailHtml, escapeHtml } from "./email.mjs";
 
 const dynamo = new DynamoDBClient({});
 const ses = new SESv2Client({});
@@ -87,27 +87,28 @@ async function notify(event) {
       Destination: { ToAddresses: [email] },
       Content: {
         Simple: {
-          Subject: { Data: "Your LCW Sandbox Badge is ready to claim" },
+          Subject: { Data: "Your LCW Alpha Testing Badge is ready" },
           Body: {
+            // The same wording in both versions; the sign-off is the HTML
+            // layout's footer
             Text: {
               Data:
-                `Hello ${name},\n\n` +
-                `A credential — the LCW Sandbox Badge, issued to ${name} — is ready for you to collect.\n\n` +
-                `Open this link and click "Add to Wallet" to claim it into your Learner Credential Wallet:\n\n` +
-                `${claimUrl}\n\n` +
-                `You'll need a wallet registered with your browser (in the LCW sandbox, use "Enable browser wallet").\n\n` +
-                `— LCW Sandbox Issuer`,
+                `Hi ${name}, your LCW Alpha Testing Badge is ready. Open the link and choose Add to Web Wallet to add it to your Learner Credential Wallet.\n\n` +
+                `Get my badge: ${claimUrl}\n\n` +
+                `If Add to Web Wallet doesn't show your wallet, sign in to your wallet, choose Settings → Enable browser wallet, and open this link again.\n\n` +
+                `This badge is for testing the alpha. It doesn't certify any skill or achievement.\n\n` +
+                `${ORG_NAME} · Learner Credential Wallet`,
             },
             Html: {
               Data: emailHtml({
-                title: "Your LCW Sandbox Badge is ready",
+                title: "Your LCW Alpha Testing Badge is ready",
                 paragraphs: [
-                  `Hello ${escapeHtml(name)},`,
-                  `A credential &mdash; the <strong>LCW Sandbox Badge</strong>, issued to ${escapeHtml(name)} &mdash; is ready for you to collect.`,
-                  `Open the collection page and click <strong>Add to Wallet</strong> to claim it into your Learner Credential Wallet. You will need a wallet registered with your browser (in the LCW sandbox, use &ldquo;Enable browser wallet&rdquo;).`,
+                  `Hi ${escapeHtml(name)}, your LCW Alpha Testing Badge is ready. Open the link and choose Add to Web Wallet to add it to your Learner Credential Wallet.`,
                 ],
-                button: { label: "Open the collection page", url: claimUrl },
-                after: `<p style="font-size:14px;color:#6b7280;">&mdash; LCW Sandbox Issuer</p>`,
+                button: { label: "Get my badge", url: claimUrl },
+                after:
+                  `<p>If Add to Web Wallet doesn&#39;t show your wallet, sign in to your wallet, choose Settings &rarr; Enable browser wallet, and open this link again.</p>` +
+                  `<p>This badge is for testing the alpha. It doesn&#39;t certify any skill or achievement.</p>`,
               }),
             },
           },

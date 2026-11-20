@@ -27,7 +27,7 @@ export async function issuerSuite() {
   return cachedSuite;
 }
 
-// The one credential this issuer knows how to issue: the LCW Sandbox Badge,
+// The one credential this issuer knows how to issue: the LCW Alpha Testing Badge,
 // bound to the holder DID the DIDAuth presentation proved control of. When
 // the exchange carries the recipient's name (from the notification link), it
 // goes on the credential subject.
@@ -40,7 +40,7 @@ export function badgeCredential({ issuerDid, holderDid, holderName }) {
     ],
     id: `urn:uuid:${crypto.randomUUID()}`,
     type: ["VerifiableCredential", "OpenBadgeCredential"],
-    name: "LCW Sandbox Badge",
+    name: "LCW Alpha Testing Badge",
     issuer: {
       id: issuerDid,
       type: ["Profile"],
@@ -53,15 +53,14 @@ export function badgeCredential({ issuerDid, holderDid, holderName }) {
       type: ["AchievementSubject"],
       ...(holderName && { name: holderName }),
       achievement: {
-        id: "urn:uuid:8asd10f3-2c6b-4b1e-9a05-lcwsandbox01",
+        id: "urn:uuid:17809526-30f7-48bb-8275-b209dff5d59c",
         type: ["Achievement"],
         achievementType: "Badge",
-        name: "LCW Sandbox Badge",
+        name: "LCW Alpha Testing Badge",
         description:
-          "The holder claimed a credential from the LCW sandbox issuer over a CHAPI + VC API exchange.",
+          "Issued to people who tested the Learner Credential Wallet alpha. It doesn't certify any skill, course or achievement.",
         criteria: {
-          narrative:
-            "Claimed via a DIDAuth-authenticated workflow exchange, proving control of the wallet DID this credential is bound to.",
+          narrative: "Claimed into a Learner Credential Wallet during the alpha.",
         },
         image: {
           id: "https://digitalcredentials.github.io/badge-assets/lcw-exp.png",
