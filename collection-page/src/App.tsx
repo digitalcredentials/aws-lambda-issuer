@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import * as polyfill from 'credential-handler-polyfill'
 import QRCode from 'qrcode'
 
@@ -222,7 +222,30 @@ function ClaimCard({ request, onRefused }: { request: Claim; onRefused: () => vo
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
-  const [mobile, setMobile] = useState<{ link: string; qr: string } | null>(null)
+  const [mobile, setMobile] = useState<{ link: string; qr: string; exchangeUrl: string } | null>(null)
+
+  // Whether the issuer has issued the badge for an exchange: the page says
+  // the badge was added only when this is so, whatever the wallet returned
+  async function exchangeComplete(exchangeUrl: string): Promise<boolean> {
+    const res = await fetch(exchangeUrl)
+    return res.ok && (await res.json()).state === 'complete'
+  }
+
+  // The mobile app finishes the claim on the phone, so while its QR code is
+  // shown the page asks the issuer every few seconds whether it is done
+  useEffect(() => {
+    if (!mobile || done) {
+      return
+    }
+    const timer = setInterval(() => {
+      exchangeComplete(mobile.exchangeUrl).then((complete) => {
+        if (complete) {
+          setDone(true)
+        }
+      }, () => undefined)
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [mobile, done])
 
   async function createExchange() {
     const res = await fetch(`${API}/workflows/${WORKFLOW}/exchanges`, {
@@ -251,7 +274,7 @@ function ClaimCard({ request, onRefused }: { request: Claim; onRefused: () => vo
         `&challenge=${encodeURIComponent(verifiablePresentationRequest.challenge)}` +
         '&auth_type=bearer'
       const qr = await QRCode.toDataURL(link, { width: 220, margin: 1 })
-      setMobile({ link, qr })
+      setMobile({ link, qr, exchangeUrl: id })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
     } finally {
@@ -270,7 +293,7 @@ function ClaimCard({ request, onRefused }: { request: Claim; onRefused: () => vo
 
       // A fresh exchange for this claim; its request carries the challenge,
       // domain, and the exchange URL the wallet interacts with.
-      const { verifiablePresentationRequest } = await createExchange()
+      const { id: exchangeUrl, verifiablePresentationRequest } = await createExchange()
 
       // Call the CHAPI polyfill's container directly: password-manager
       // extensions (e.g. 1Password) can lock navigator.credentials.get, in
@@ -287,6 +310,12 @@ function ClaimCard({ request, onRefused }: { request: Claim; onRefused: () => vo
         setError('Wallet selection was cancelled.')
         return
       }
+      // The wallet returned something; the claim is finished only if the
+      // issuer has issued the badge
+      if (!(await exchangeComplete(exchangeUrl))) {
+        setError("The badge wasn't added. Please try again.")
+        return
+      }
       setDone(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
@@ -299,17 +328,23 @@ function ClaimCard({ request, onRefused }: { request: Claim; onRefused: () => vo
     <div style={styles.card}>
       <img style={styles.image} src={BADGE_IMAGE} alt={BADGE_NAME} />
       <h1 style={{ fontSize: 22, margin: '12px 0 4px' }}>{BADGE_NAME}</h1>
-      <p style={{ fontSize: 14, color: '#4b5563', margin: 0 }}>
-        A badge for <strong>{name}</strong> is ready. Add it to your Learner
-        Credential Wallet.
-      </p>
-      <button style={styles.button} onClick={claim} disabled={busy}>
-        {busy ? 'Working…' : 'Add to Web Wallet'}
-      </button>
-      <button style={styles.secondaryButton} onClick={addToMobileWallet} disabled={busy}>
-        Add to Mobile Wallet
-      </button>
-      {mobile && (
+      {!done && (
+        <p style={{ fontSize: 14, color: '#4b5563', margin: 0 }}>
+          A badge for <strong>{name}</strong> is ready. Add it to your Learner
+          Credential Wallet.
+        </p>
+      )}
+      {!done && (
+        <>
+          <button style={styles.button} onClick={claim} disabled={busy}>
+            {busy ? 'Working…' : 'Add to Web Wallet'}
+          </button>
+          <button style={styles.secondaryButton} onClick={addToMobileWallet} disabled={busy}>
+            Add to Mobile Wallet
+          </button>
+        </>
+      )}
+      {mobile && !done && (
         <div style={{ marginTop: 14 }}>
           <img src={mobile.qr} alt="QR code for the mobile claim link" style={{ width: 180, height: 180 }} />
           <p style={{ ...styles.note, marginTop: 4 }}>
@@ -324,21 +359,23 @@ function ClaimCard({ request, onRefused }: { request: Claim; onRefused: () => vo
       )}
       {done && (
         <p style={styles.success}>
-          Badge added. Check your wallet.
+          Your badge has been added. Open your wallet to see it.
         </p>
       )}
-      {error && <p style={styles.error}>{error}</p>}
-      {error && 'code' in access && (
+      {!done && error && <p style={styles.error}>{error}</p>}
+      {!done && error && 'code' in access && (
         <button style={styles.secondaryButton} onClick={onRefused}>
           Enter the code again
         </button>
       )}
-      <p style={styles.note}>
-        Add to Web Wallet needs your wallet enabled in this browser. If you
-        haven&#39;t done that yet, sign in to your wallet and choose Settings →
-        Enable browser wallet. Add to Mobile Wallet opens the{' '}
-        <a href="https://lcw.app" style={{ color: '#4f46e5' }}>Learner Credential Wallet app</a>.
-      </p>
+      {!done && (
+        <p style={styles.note}>
+          Add to Web Wallet needs your wallet enabled in this browser. If you
+          haven&#39;t done that yet, sign in to your wallet and choose Settings →
+          Enable browser wallet. Add to Mobile Wallet opens the{' '}
+          <a href="https://lcw.app" style={{ color: '#4f46e5' }}>Learner Credential Wallet app</a>.
+        </p>
+      )}
     </div>
   )
 }
